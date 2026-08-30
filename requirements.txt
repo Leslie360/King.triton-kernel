@@ -1,0 +1,11 @@
+# King.triton-kernel runtime deps
+torch>=2.8
+triton>=3.4
+vllm>=0.8.5
+verl  # RL training framework (see drkernel/verl_patch)
+ray
+fastapi
+redis
+pydantic>=2
+pandas
+pyarrow

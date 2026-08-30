@@ -1,0 +1,15 @@
+# 私有数据/产物（不开源）
+w3_results/
+KernelGYM/drkernel/checkpoints/
+KernelGYM/drkernel/outputs/
+KernelGYM/logs*/
+data/drkernel-rl-data/
+data/drkernel-validation-data/
+models/
+*.parquet
+*.jsonl
+*.safetensors
+*.pt
+*.log
+__pycache__/
+*.pyc
