@@ -1,0 +1,90 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "king-triton-kernel"
+version = "0.1.0"
+description = "Triton kernel generation with RLVR — 让 LLM 写出'正确且更快'的 Triton kernel (14B · 单机 8×A800)"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+authors = [{ name = "King.triton-kernel contributors" }]
+keywords = ["triton", "kernel", "rlvr", "reinforcement-learning", "kernel-generation", "cuda"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "torch>=2.0",
+    "triton>=3.0",
+    "numpy",
+    "fastapi",
+    "uvicorn>=0.24",
+    "pydantic>=2",
+    "pydantic-settings",
+    "redis",
+    "aiohttp",
+    "psutil",
+]
+
+[project.optional-dependencies]
+# 训练侧 RL 栈(verl 集成), 独立 extra, 保留 Apache-2.0 版权头(见 drkernel/kernel/LICENSE 说明)
+train = [
+    "verl",
+    "ray>=2.4",
+    "vllm>=0.8",
+    "httpx",
+    "pandas",
+    "pyarrow",
+]
+# 评测工具(evals/) 聚合口径
+eval = [
+    "pandas",
+    "pyarrow",
+]
+dev = [
+    "pytest>=7",
+    "pytest-cov",
+    "ruff",
+    "mypy",
+    "pre-commit",
+]
+
+[project.scripts]
+kernelgym-server = "kernelgym.server.api.server:main"
+kernelgym-worker = "kernelgym.worker.gpu_worker:main"
+kernelgym-worker-monitor = "kernelgym.worker.worker_monitor:main"
+kernelgym-single-worker = "kernelgym.worker.single_worker:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["kernelgym*"]
+exclude = ["tests*", "evals*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "gpu: 需要真实 NVIDIA GPU 执行 kernel 的测试",
+    "redis: 需要真实 redis 的集成测试",
+    "slow: 慢测试/需要 eval server",
+]
+addopts = "-m 'not gpu and not redis and not slow'"
+
+[tool.ruff]
+line-length = 110
+target-version = "py310"
+extend-exclude = ["drkernel", "docs", "evals"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "UP", "B"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true
+
+[tool.coverage.run]
+source = ["kernelgym"]
+omit = ["*/__init__.py", "tests/*"]

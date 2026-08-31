@@ -11,5 +11,28 @@ models/
 *.safetensors
 *.pt
 *.log
+
+# Python / 测试 / 构建缓存（工程化排除）
 __pycache__/
 *.pyc
+*.pyo
+*.egg-info/
+.venv/
+venv/
+env/
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.ruff_cache/
+.mypy_cache/
+.pyright/
+dist/
+build/
+*.whl
+
+# 编辑器/系统
+.DS_Store
+.idea/
+.vscode/
+*.swp
