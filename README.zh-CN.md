@@ -6,6 +6,8 @@
 
 [English](README.md) | **简体中文**
 
+> **King.triton-kernel** 是一个强化学习训练框架：教会 14B 模型在真实 GPU 上编写、编译并运行更快的 Triton kernel，把算子规格变成 KernelBench L2 上可验证的加速——另附一套独立的 GPU 评估环境，可用于任何需要真实执行校验的代码生成任务。
+
 面向 KernelBench L2 的 **Triton kernel 生成 RLVR 训练管线**：将 14B 模型训练为能自主完成「分析算子 → 编写 Triton 实现 → 编译执行 → 按正确性与速度反馈迭代修复」全流程的 agent，并提供一套可独立复用的 GPU 分布式评估环境。
 
 ---

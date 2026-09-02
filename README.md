@@ -6,6 +6,8 @@
 
 **English** | [简体中文](README.zh-CN.md)
 
+> **King.triton-kernel** is a reinforcement-learning training framework that teaches a 14B LLM to write, compile, and run faster Triton kernels on real GPUs — turning operator specs into verified speedups on KernelBench L2 — plus a standalone GPU evaluation environment for any execution-verified code-generation task.
+
 An RLVR training pipeline for Triton kernel generation on KernelBench L2: it trains a 14B model into an agent that autonomously analyzes an operator, writes a Triton implementation, compiles and executes it on a real GPU, and iteratively repairs it based on correctness and speed feedback — plus a standalone, reusable GPU evaluation environment.
 
 ---
