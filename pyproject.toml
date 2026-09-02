@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "king-triton-kernel"
 version = "0.1.0"
-description = "Triton kernel generation with RLVR — 让 LLM 写出'正确且更快'的 Triton kernel (14B · 单机 8×A800)"
+description = "RLVR training pipeline for Triton kernel generation — teach an LLM to write correct and faster kernels (14B · single 8xA800 node)"
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.10"
@@ -30,7 +30,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# 训练侧 RL 栈(verl 集成), 独立 extra, 保留 Apache-2.0 版权头(见 drkernel/kernel/LICENSE 说明)
+# Training-side RL stack (verl integration); separate extra, keeps the Apache-2.0
+# copyright header (see the note in drkernel/kernel/LICENSE).
 train = [
     "verl",
     "ray>=2.4",
@@ -39,7 +40,7 @@ train = [
     "pandas",
     "pyarrow",
 ]
-# 评测工具(evals/) 聚合口径
+# Evaluation tooling (evals/) aggregation scripts
 eval = [
     "pandas",
     "pyarrow",
@@ -66,9 +67,9 @@ exclude = ["tests*", "evals*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [
-    "gpu: 需要真实 NVIDIA GPU 执行 kernel 的测试",
-    "redis: 需要真实 redis 的集成测试",
-    "slow: 慢测试/需要 eval server",
+    "gpu: tests that execute kernels on a real NVIDIA GPU",
+    "redis: integration tests that require a real redis instance",
+    "slow: slow tests / tests that require the eval server",
 ]
 addopts = "-m 'not gpu and not redis and not slow'"
 

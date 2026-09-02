@@ -13,8 +13,9 @@
 # limitations under the License.
 
 """
-Kernel 奖励函数实现
-与 KernelServer 集成，评估内核代码的质量和性能
+Kernel reward function implementation.
+
+Integrates with KernelServer to evaluate kernel code quality and performance.
 """
 
 import asyncio
@@ -25,19 +26,21 @@ from typing import Dict, Any
 from kernel.rewards.reward_client import KernelRewardClient
 
 
-# 全局客户端实例与其配置，复用连接且在配置变更时重建
+# Global client instance and its config; reuse connection and rebuild on config change
 _global_client = None
 _global_client_cfg = {}
 
 
 def _resolve_use_reference_cache(reward_config) -> bool:
     """
-    A4: 解析是否启用 reference_cache（判分不再重跑 reference 分母）。
-    优先级（高→低）:
-      1. ENABLE_REFERENCE_CACHE 环境变量（A/B 校准用，显式覆盖 config）
-      2. reward_config.reference_cache.enable（由 main_kernel/main_grading 把顶层
-         reference_cache 段合并进 reward_model 后随 reward_config 线程化到这里）
-      3. 默认 False（保持原行为，不回退）
+    A4: Resolve whether to enable reference_cache (scoring no longer re-runs the
+    reference denominator).
+    Priority (high → low):
+      1. ENABLE_REFERENCE_CACHE env var (A/B calibration; explicitly overrides config)
+      2. reward_config.reference_cache.enable (the top-level reference_cache section
+         is merged into reward_model by main_kernel/main_grading and threaded through
+         reward_config to here)
+      3. Default False (preserves original behavior, no fallback)
     """
     env = os.environ.get("ENABLE_REFERENCE_CACHE", "").strip().lower()
     if env in ("1", "true", "yes", "on"):
@@ -57,10 +60,12 @@ def _resolve_use_reference_cache(reward_config) -> bool:
 
 def attach_reference_cache(reward_model_cfg, full_cfg):
     """
-    A4: 把顶层 reference_cache 段合并进 reward_model 配置，使其随 reward_config
-    线程化到 kernel_reward.py（Hydra config 默认 frozen，故用 OmegaConf.merge
-    返回新配置而非原地改）。
-    返回新的 reward_model 配置；异常时原样返回，绝不因 A4 阻断训练/eval。
+    A4: Merge the top-level reference_cache section into reward_model config so it
+    threads through reward_config to kernel_reward.py (Hydra config is frozen by
+    default, so use OmegaConf.merge to return a new config instead of mutating in
+    place).
+    Returns the new reward_model config; on exception returns the original — never
+    block training/eval because of A4.
     """
     if reward_model_cfg is None or full_cfg is None:
         return reward_model_cfg
@@ -77,60 +82,61 @@ def attach_reference_cache(reward_model_cfg, full_cfg):
 
 def extract_reference_code(solution_str: str) -> str:
     """
-    从解决方案字符串中提取参考代码
-    
+    Extract reference code from the solution string.
+
     Args:
-        solution_str: 包含提示和响应的完整字符串
-        
+        solution_str: Full string containing prompt and response.
+
     Returns:
-        提取的参考代码
+        The extracted reference code.
     """
-    # 查找参考实现标记
+    # Look for reference-implementation markers
     patterns = [
         r"# Reference Implementation\s*\n(.*?)(?=# Your Task|# Generate|$)",
         r"```python\s*# Reference\s*\n(.*?)```",
         r"# PyTorch Reference:\s*\n(.*?)(?=# Task|# Generate|$)",
     ]
-    
+
     for pattern in patterns:
         match = re.search(pattern, solution_str, re.DOTALL)
         if match:
             return match.group(1).strip()
-    
-    # 如果没有找到特定标记，尝试提取第一个 Python 代码块
+
+    # If no specific marker, try to extract the first Python code block
     code_block_match = re.search(r"```python\s*\n(.*?)```", solution_str, re.DOTALL)
     if code_block_match:
         return code_block_match.group(1).strip()
-    
-    # 回退到整个字符串
+
+    # Fall back to the whole string
     return solution_str
 
 
 def extract_kernel_code(solution_str: str) -> str:
     """
-    从解决方案字符串中提取内核代码
-    
+    Extract kernel code from the solution string.
+
     Args:
-        solution_str: 包含提示和响应的完整字符串
-        
+        solution_str: Full string containing prompt and response.
+
     Returns:
-        提取的内核代码
+        The extracted kernel code.
     """
-    # 查找内核实现标记
+    # Look for kernel-implementation markers
     patterns = [
         r"# Kernel Implementation\s*\n(.*?)(?=# End|$)",
         r"```python\s*# Kernel\s*\n(.*?)```",
         r"# Your implementation:\s*\n(.*?)(?=# End|$)",
         r"# Generated kernel:\s*\n(.*?)(?=# End|$)",
     ]
-    
+
     for pattern in patterns:
         match = re.search(pattern, solution_str, re.DOTALL)
         if match:
             return match.group(1).strip()
-    
-    # 如果没有找到特定标记，用共享鲁棒提取(取最后块 + 剥散文, 与 eval 侧 main_grading 一致,
-    # 2026-08-27 L4 防"改错引擎"复发)
+
+    # If no specific marker, use the shared robust extractor (take last block +
+    # strip prose, aligned with eval-side main_grading, 2026-08-27 L4 fix to
+    # prevent "wrong-engine modification" regression)
     try:
         from ..rew_common import extract_code_robust
     except ImportError:
@@ -139,21 +145,21 @@ def extract_kernel_code(solution_str: str) -> str:
 
 def compute_kernel_reward_batch(solution_strs: list, ground_truths: list, entry_points: str, **kwargs) -> list:
     """
-    批量计算内核代码奖励值
-    
+    Compute kernel-code rewards in batch.
+
     Args:
-        solution_strs: 解决方案字符串列表
-        ground_truths: 参考实现列表
-        **kwargs: 其他参数
-        
+        solution_strs: List of solution strings.
+        ground_truths: List of reference implementations.
+        **kwargs: Other arguments.
+
     Returns:
-        奖励结果列表
+        List of reward results.
     """
     try:
-        # 准备任务数据
+        # Prepare task data
         tasks = []
 
-        # 统一从 reward_config 读取客户端配置
+        # Read client config uniformly from reward_config
         reward_config = kwargs.get("reward_config", None)
         if hasattr(reward_config, "reward_model"):
             reward_config = reward_config.reward_model
@@ -174,10 +180,10 @@ def compute_kernel_reward_batch(solution_strs: list, ground_truths: list, entry_
         detect_decoy_kernel = getattr(reward_config, "detect_decoy_kernel")
         reference_backend = getattr(reward_config, "reference_backend")
 
-        # A4: 解析 reference_cache 开关（config 线程化 + env 覆盖）
+        # A4: Resolve reference_cache switch (config threading + env override)
         use_reference_cache = _resolve_use_reference_cache(reward_config)
         if use_reference_cache:
-            logging.info("A4: reference_cache ENABLED (判分不再重跑 reference 分母)")
+            logging.info("A4: reference_cache ENABLED (scoring no longer re-runs reference denominator)")
 
         for i, solution_str in enumerate(solution_strs):
             # reference_code = extract_reference_code(solution_str)
@@ -207,15 +213,15 @@ def compute_kernel_reward_batch(solution_strs: list, ground_truths: list, entry_
                 "reference_backend": reference_backend,
             })
         
-        # 同步调用异步函数
+        # Synchronously call the async function
         loop = None
         try:
             loop = asyncio.get_event_loop()
         except RuntimeError:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
-        
-        # 获取客户端并批量计算奖励（仅从 reward_config 取值）
+
+        # Get the client and compute rewards in batch (read values only from reward_config)
         if reward_config is None:
             raise ValueError("reward_config is required")
 
@@ -230,7 +236,7 @@ def compute_kernel_reward_batch(solution_strs: list, ground_truths: list, entry_
             
         client = _global_client
         
-        # 调用时传递 task_timeout；A4: use_reference_cache 由 config/env 解析
+        # Call passing task_timeout; A4: use_reference_cache resolved from config/env
         results = loop.run_until_complete(
             client.compute_batch_rewards(tasks, use_reference_cache=use_reference_cache,
                                        is_valid=is_valid, task_timeout=task_timeout,
@@ -241,7 +247,7 @@ def compute_kernel_reward_batch(solution_strs: list, ground_truths: list, entry_
         
     except Exception as e:
         logging.error(f"Error in compute_kernel_reward_batch: {e}")
-        # 返回错误结果列表
+        # Return a list of error results
         return [
             {
                 "score": reward_config.reward_policy.penalties.penalty_score,

@@ -32,7 +32,9 @@ def early_kernel_validation(
             return False, error_msg, ErrorCode.VALIDATION_ERROR
 
         try:
-            # 归一化 LLM 常见 Unicode 字符 (弯引号/全角标点/破折号/箭头, 在注释/字符串无害; 与 reward_client._cheap_syntax_filter 一致)
+            # Normalize common Unicode characters LLMs emit (curly quotes /
+            # full-width punctuation / dashes / arrows — harmless in comments and
+            # strings; kept consistent with reward_client._cheap_syntax_filter)
             _k = kernel_code
             for _c, _r in [("’","'"),("‘","'"),("“",'"'),("”",'"'),
                            ("—","-"),("–","-"),("―","-"),

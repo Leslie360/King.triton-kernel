@@ -48,9 +48,12 @@ async def lifespan(app: FastAPI):
     """Application lifespan manager."""
     global task_manager, redis_client
 
-    # 2026-08-29 P0 深修(K3 §20 Q2): 注册 reference_cache provider(server 启动时一次)。
-    # A4 本意: 固定 reference 分母跨 run 复用, 消除 run 级计时方差(gs300 std=23.6 根因)。
-    # 之前从未注册(set_reference_cache 无调用者 → 缓存恒空 → reference 每次重跑)。
+    # 2026-08-29 P0 deep fix (K3 §20 Q2): register reference_cache provider (once at
+    # server startup).
+    # A4 intent: fix the reference denominator across runs, eliminating run-level
+    # timing variance (root cause of gs300 std=23.6).
+    # Previously never registered (no caller for set_reference_cache → cache always
+    # empty → reference re-ran every time).
     try:
         from kernelgym.workflow.kernelbench_helpers import (
             InMemoryReferenceCache,
@@ -850,23 +853,26 @@ async def worker_heartbeat(
                                     detail=f"Failed to auto-register worker {worker_id}")
             logger.info(f"Auto-registered worker {worker_id} on heartbeat with device {resolved_device}")
         
-        # 设备冲突与空node_id防呆：读取注册信息，校验 node_id/hostname/设备一致性
+        # Device-conflict / empty-node_id guard: read registration, validate
+        # node_id/hostname/device consistency
         try:
             reg = task_manager.worker_registry.get(worker_id)
             if reg:
-                # 若注册表无 node_id/hostname，但这次心跳带了，则补写（遗留修复）
+                # If the registry has no node_id/hostname but this heartbeat brought
+                # one, fill it in (legacy fix)
                 if not reg.get("node_id") and node_id:
                     reg["node_id"] = node_id
                 if not reg.get("hostname") and hostname:
                     reg["hostname"] = hostname
-                # 如果设备不一致，拒绝心跳
+                # If the device differs, refuse the heartbeat
                 if device and reg.get("device") and reg.get("device") != device:
                     logger.warning(f"Heartbeat refused: device mismatch for {worker_id}, reg={reg.get('device')} req={device}")
                     raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Device mismatch; please re-register")
         except Exception:
             pass
 
-        # Update heartbeat in load balancer（仅当注册信息一致且未冲突时）
+        # Update heartbeat in load balancer (only when registration info is
+        # consistent and not in conflict)
         await task_manager.worker_load_balancer.update_worker_heartbeat(worker_id)
         lb_keys = list(task_manager.worker_load_balancer.available_workers.keys())
         logger.info(f"Heartbeat updated for {worker_id}; LB now has: {lb_keys}")

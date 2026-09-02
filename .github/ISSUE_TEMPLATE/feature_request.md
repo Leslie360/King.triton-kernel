@@ -6,32 +6,32 @@ labels: ["enhancement"]
 assignees: ""
 ---
 
-## 动机 / 问题
+## Motivation / Problem
 
-<!-- 你想解决什么问题? 为什么现有功能不够用? 请描述使用场景。 -->
+<!-- What problem are you trying to solve? Why is the current functionality insufficient? Describe the use case. -->
 
-## 建议方案
+## Proposed Solution
 
-<!-- 你希望新增/改进什么? 尽可能具体(接口、命令、行为)。 -->
+<!-- What do you want added/improved? Be as specific as possible (interface, command, behavior). -->
 
-## 备选方案
+## Alternatives Considered
 
-<!-- 你考虑过哪些其他做法? -->
+<!-- What other approaches have you considered? -->
 
-## 与本项目主张的关系
+## Relation to This Project's Claims
 
 <!--
-本项目核心主张是"奖励执行正确, 编译率≠正确率" + 评测口径诚实。
-如果本功能涉及:
-- 评测指标/口径, 请说明会如何保证口径不混用;
-- reward/训练方法, 请说明如何与"执行验证为硬门槛"一致;
-- 新的评估后端或判分逻辑, 请说明 correctness 校验与计时方案。
+This project's core claims are "reward execution correctness, compile rate ≠ correctness rate"
+plus honest evaluation calibers. If this feature involves:
+- evaluation metrics/calibers, explain how caliber mixing will be prevented;
+- reward/training methods, explain how it stays consistent with "execution verification as the hard gate";
+- new evaluation backends or grading logic, describe the correctness check and timing scheme.
 -->
 
-## 验收标准
+## Acceptance Criteria
 
-<!-- 如何判断此功能做完了、做对了? 尽量给出可测的判据。 -->
+<!-- How do we judge this feature is done and done right? Provide testable criteria where possible. -->
 
-## 额外上下文
+## Additional Context
 
-<!-- 相关 issue/PR、参考项目、链接等。 -->
+<!-- Related issues/PRs, reference projects, links, etc. -->

@@ -188,8 +188,10 @@ class KernelBenchWorkflowController(WorkflowController):
                     self._persist_result(eval_task, result)
                     return result
                 ref_result = ReferenceTimingResult.from_dict(ref_result_dict)
-                # 2026-08-29 P0 深修(K3 §20 Q2): reference 跑完 PUT 进缓存,
-                # 固定分母跨 run 复用(消除 run 级 reference 计时方差)。key=(uuid, ref_hash, is_valid)。
+                # 2026-08-29 P0 deep fix (K3 §20 Q2): PUT the reference into the
+                # cache after it runs, so the fixed denominator is reused across
+                # runs (eliminating run-level reference-timing variance).
+                # key = (uuid, ref_hash, is_valid).
                 if getattr(eval_task, "use_reference_cache", False):
                     _put_reference_cache(
                         eval_task.uuid,

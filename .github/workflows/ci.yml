@@ -47,11 +47,13 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: "pip"
 
-      # 说明: 本包的核心依赖 torch/triton 体量很大, 在 CI 上安装成本高且不稳定.
-      # 处理策略分两层:
-      #   1) --no-deps 只装本包纯 Python 布局, 保证 import 路径可用;
-      #   2) 尽力装 torch CPU 版, 失败不阻塞: conftest 的 gpu_available fixture
-      #      对 torch import 是 try/except 安全的, 无 torch 时纯逻辑测试仍跑.
+      # Note: the core dependencies torch/triton are large and costly to install
+      # in CI, and installs are often flaky. Strategy is two-layer:
+      #   1) --no-deps installs only this package's pure-Python layout so import
+      #      paths resolve;
+      #   2) best-effort CPU-only torch install that never blocks the job: the
+      #      gpu_available fixture in conftest wraps the torch import in
+      #      try/except, so pure-logic tests still run without torch.
       - name: Install package (editable, no heavy deps)
         run: pip install -e ".[dev]" --no-deps
 

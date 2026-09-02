@@ -1,20 +1,22 @@
-"""rew_common.py — 训练/eval 共享的代码提取逻辑 (K3 L4: 双路径统一, 防"改错引擎"复发)"""
+"""rew_common.py — shared code-extraction logic for training and eval (K3 L4: unify
+the two paths to prevent "wrong-engine modification" regression)."""
 
 import re
 
 
 def extract_code_robust(text: str) -> str:
-    """从文本提取最终 Python 代码:
-    ①取**最后一个**代码块(最终答案, 非思考/工具调用的块)
-    ②**剥离开头思考散文**(从第一个 import/from/class/def 开始)——模型常把
-      "Thinking, analysis..." 写进 ```python 块, 导致语法错(实测修 41% syntax 错)。
-    兼容 ```python / ``` / ```<lang> 标记。
+    """Extract the final Python code from text:
+    1) Take the **last** code block (the final answer, not the thinking/tool-call blocks)
+    2) Strip the leading thinking prose (start from the first import/from/class/def) —
+       the model often writes "Thinking, analysis..." inside a ```python block, which
+       causes syntax errors (in practice, this fixes 41% of syntax errors).
+    Compatible with ```python / ``` / ```<lang> markers.
     """
     if not text:
         return ""
     blocks = re.findall(r"```(?:\w+)?\s*\n(.*?)```", text, re.DOTALL)
     code = blocks[-1].strip() if blocks else text
-    # 剥离开头散文: 从第一个 import/from/class/def 开始
+    # Strip the leading prose: start from the first import/from/class/def
     m = re.search(r"(?:^|\n)((?:import |from |class |def ))", code)
     if m:
         code = code[m.start():]

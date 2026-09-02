@@ -15,8 +15,10 @@ from kernelgym.worker.gpu_worker import GPUWorker
 
 logger = logging.getLogger("kernelgym.single_worker")
 
-# 方案A: eval worker 显存硬上限(防止 colocate 时 vLLM+eval 争 OOM)
-# EVAL_WORKER_MEM_FRACTION 默认 0.18 (~14GB), 由 w3_launch_colocate_v1.sh 覆盖
+# Scheme A: hard VRAM cap for the eval worker (prevents OOM contention between
+# vLLM and eval when colocated).
+# EVAL_WORKER_MEM_FRACTION defaults to 0.18 (~14GB); overridden by
+# w3_launch_colocate_v1.sh.
 def _apply_memory_fraction(device: str) -> None:
     frac = float(os.environ.get("EVAL_WORKER_MEM_FRACTION", "0.18"))
     try:
@@ -43,7 +45,7 @@ async def main():
     await redis_client.ping()
     logger.info(f"Redis connection established for worker {args.worker_id}")
     
-    # 方案A: 应用显存硬上限(colocate 防 OOM)
+    # Scheme A: apply the hard VRAM cap (prevents OOM when colocated)
     _apply_memory_fraction(args.device)
 
     worker = GPUWorker(args.worker_id, args.device, redis_client)

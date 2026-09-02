@@ -18,12 +18,17 @@ _reference_cache: Any = None
 
 
 class InMemoryReferenceCache:
-    """2026-08-29 P0 深修(K3 §20 Q2): reference 分母缓存, 固定分母跨 run 复用.
+    """2026-08-29 P0 deep fix (K3 §20 Q2): reference-denominator cache — fix the
+    denominator and reuse it across runs.
 
-    A4 本意: 判分不重跑 reference 分母, 且消除 run 级 reference 计时方差。
-    根因: gs300 方差 std=23.6, 同一 reference 不同 run 差 42%(机器级抖动)。
-    缓存 key = (uuid, reference_code_hash, is_valid) —— 同题同 reference 同 validation 状态复用分母。
-    注意: 缓存只在本 server 进程内有效(server 重启缓存清, 分母重新计时)。
+    A4 intent: do not re-run the reference denominator for scoring, and remove
+    run-level reference-timing variance.
+    Root cause: gs300 variance std=23.6; the same reference differs by 42%
+    across runs (machine-level jitter).
+    Cache key = (uuid, reference_code_hash, is_valid) — the denominator is reused
+    for the same problem + same reference + same validation state.
+    Note: the cache is valid only within this server process (a server restart
+    clears the cache and re-times the denominator).
     """
     def __init__(self) -> None:
         self._store: dict = {}
@@ -63,7 +68,9 @@ def _get_cached_reference_runtime(
 
 def _put_reference_cache(uuid: Optional[str], reference_code: str, is_valid: bool,
                          runtime: float) -> None:
-    """PUT reference 分母进缓存(2026-08-29 P0 深修): reference 跑完后写, 跨 run 固定分母复用."""
+    """PUT the reference denominator into the cache (2026-08-29 P0 deep fix):
+    write after the reference has been timed, and reuse the fixed denominator
+    across runs."""
     if _reference_cache is None:
         return
     try:

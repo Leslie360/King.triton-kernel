@@ -73,14 +73,14 @@ class GPUWorker:
         self.pool_size = getattr(settings, "worker_pool_size", 1)
         self.max_tasks_per_worker = getattr(settings, "max_tasks_per_worker", 1)
         
-        # GPU device setup (主进程不使用CUDA，只存储device_id)
-        # 从"cuda:N"提取device_id
+        # GPU device setup (the main process never uses CUDA; it only stores device_id)
+        # Extract device_id from "cuda:N"
         if device.startswith("cuda:"):
             self.device_id = int(device.split(":")[1])
         else:
             raise ValueError(f"Invalid device format: {device}, expected 'cuda:N'")
         
-        # GPU信息缓存（用于_get_worker_info）
+        # GPU-info cache (used by _get_worker_info)
         self.gpu_info = {
             'name': 'Unknown',
             'total_memory': 0
@@ -256,7 +256,8 @@ class GPUWorker:
             await self.http_session.close()
         self.http_session = None
 
-        # GPU cleanup不再需要（主进程不使用CUDA，worker pool已清理）
+        # GPU cleanup is no longer needed (the main process never uses CUDA; the
+        # worker pool has already cleaned up)
         logger.info("GPU cleanup handled by worker pool shutdown")
 
         # Log final statistics
@@ -264,25 +265,25 @@ class GPUWorker:
     
     async def _initialize_gpu(self):
         """
-        验证GPU可用性（不在主进程中初始化CUDA）
-        
-        使用nvidia-smi验证GPU，不会触发CUDA初始化。
-        GPU信息缓存用于后续的worker info查询。
+        Verify GPU availability (without initializing CUDA in the main process).
+
+        Uses nvidia-smi to verify the GPU, avoiding CUDA initialization.
+        GPU info is cached for later worker-info queries.
         """
         try:
             from kernelgym.utils.gpu_diagnostics import GPUDiagnostics
-            
+
             logger.info(f"Verifying GPU {self.device_id} availability (no CUDA init in main process)")
-            
-            # 使用nvidia-smi验证GPU（不初始化CUDA）
+
+            # Verify GPU with nvidia-smi (no CUDA initialization)
             health = GPUDiagnostics.test_gpu_health_nvidia_smi(self.device_id)
-            
+
             if not health.healthy:
                 raise RuntimeError(
                     f"GPU {self.device_id} not healthy: {health.error_message}"
                 )
-            
-            # 缓存GPU信息
+
+            # Cache GPU info
             self.gpu_info = {
                 'name': health.device_name or 'Unknown',
                 'total_memory': int(health.total_memory_gb * 1024**3) if health.total_memory_gb else 0
@@ -312,7 +313,8 @@ class GPUWorker:
                 if task_data:
                     await self._process_task(task_data)
                 else:
-                    # No tasks available. get_next_task 已 BRPOP(1s)，此处仅做极短休眠避免忙等
+                    # No tasks available. get_next_task already BRPOPs (1s); this
+                    # short sleep only prevents busy-waiting
                     await asyncio.sleep(0.1)
                     
             except Exception as e:
@@ -393,7 +395,7 @@ class GPUWorker:
             self.stats["tasks_failed"] += 1
             
         finally:
-            # GPU清理由subprocess自动处理
+            # GPU cleanup is handled automatically by the subprocess
             self.current_task = None
             self.tasks_processed += 1
 
@@ -555,12 +557,13 @@ class GPUWorker:
         """Send periodic heartbeat to indicate worker is alive."""
         while self.running:
             try:
-                # 先发 API 心跳，只有服务端接受后才更新 Redis 状态，避免幽灵条目
+                # Send the API heartbeat first; only update Redis state once the
+                # server accepts it, to avoid phantom entries
                 ok = await self._send_heartbeat_to_api()
                 if not ok:
-                    # _send_heartbeat_to_api 内已处理停机/剔除
+                    # _send_heartbeat_to_api already handled shutdown/eviction
                     break
-                # Update Redis status（仅当 API 接受心跳时）
+                # Update Redis status (only when the API accepts the heartbeat)
                 await self._update_worker_status(online=True)
                 
                 await asyncio.sleep(10)  # Heartbeat every 10 seconds
@@ -618,7 +621,8 @@ class GPUWorker:
             "gpu_info": {
                 "name": self.gpu_info.get('name', 'Unknown'),
                 "memory_total": self.gpu_info.get('total_memory', 0),
-                # 主进程不使用CUDA，无法获取实时内存使用
+                # The main process never uses CUDA, so real-time memory usage
+                # cannot be queried here
                 "memory_allocated": 0,
                 "memory_reserved": 0
             }
@@ -705,17 +709,18 @@ class GPUWorker:
             async with self.http_session.post(url, params=params) as response:
                 if response.status == 200:
                     return True
-                # 如果被拒绝（如409/410），主动停机，避免“幽灵心跳”
+                # If rejected (e.g. HTTP 409/410), shut down proactively to avoid
+                # a "phantom heartbeat"
                 logger.warning(f"Failed to send heartbeat: HTTP {response.status}; shutting down worker {self.worker_id}")
-                # 标记，避免监控误判
+                # Mark the flag so the monitor does not misjudge
                 self.shutdown_due_to_error = True
-                # 尝试从LB剔除，防止残留
+                # Try to evict from the LB to avoid residue
                 try:
                     evict_url = f"{self.api_url}/worker/evict_from_lb"
                     await self.http_session.post(evict_url, params={"worker_id": self.worker_id})
                 except Exception:
                     pass
-                # 主动停止
+                # Stop proactively
                 self.running = False
                 # Clear current_task to avoid duplicate fail_task in stop()
                 self.current_task = None
