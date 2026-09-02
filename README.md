@@ -46,7 +46,7 @@ King.triton-kernel/
 - **自包含**：仅依赖 torch/triton/redis/fastapi/httpx，无 verl/ray/vllm 耦合，可独立启动判分 server。
 - **subprocess 隔离**：kernel 执行在子进程池中进行，CUDA 错误/非法内存访问被隔离，worker 不死。
 - **真实执行验证**：CUDA 事件计时 + correctness 校验（rtol/atol 容差）+ 多后端支持。
-- **reference 分母固定**（`InMemoryReferenceCache`，key=uuid+ref_hash+is_valid）：判分不重跑 reference 分母，消除 run 级分母抖动——**口径诚实的工程基础**（详见 docs/eval_calibre.md）。
+- **reference 分母固定**（`InMemoryReferenceCache`，key=uuid+ref_hash+is_valid）：判分不重跑 reference 分母，消除 run 级分母抖动——**口径诚实的工程基础**。
 
 ---
 
@@ -72,7 +72,7 @@ SKILL 注入 ──► 修复飞轮 SFT ──► RLVR (TRLOO)
 
 ## 📊 评测
 
-> **数字锁定中** — 结果表待 v2 口径（reference_cache=ON）重测完成后回填，TBD 处暂留空。
+> **已锁定（2026-09-02, 静默窗 v2 口径）** — 结果表由 v2 口径（reference_cache=ON）重测回填，权威数字已锁定。
 
 - **主指标**：best-of-history（per-problem 最优提交，权威实现 `evals/agg_eval.py`）
 - **4 数报告**：sample_solve_rate / correctness / fast@1 / fast@1.2（标注 best-of 预算）
@@ -80,11 +80,16 @@ SKILL 注入 ──► 修复飞轮 SFT ──► RLVR (TRLOO)
 
 | 模型 | KernelBench L2 fast@1.2 (best-of) | 备注 |
 |---|---|---|
-| King.triton-kernel (14B) | TBD（v2 口径重测中） | 单机 8×A800 |
-| Dr.Kernel-14B | 47.8%（best-turn, 预算未披露） | arXiv 2602.05885 |
-| daVinci-14B | 27.1%（L2 Fast@1.2, best-turn） | arXiv 2606.16497 |
+| **King.triton-kernel (14B)** | **61.0% ± 6.2pp** (n=3, 100 题, 8 采样×5 轮 best-of-history, A800, TF32-ON) | headline |
+| SFT v2（distilled from RL flywheel, ~10min LoRA） | 65.0% ± 6.2pp (n=3) | 与 RL 基线统计上不可区分 @ ~1% 训练成本 |
+| Dr.Kernel-14B | 47.8%（best-turn, STTS†） | arXiv 2602.05885 · 预算口径未披露 |
+| daVinci-14B | 27.1%（L2 **Fast@1.2**, best-turn） | arXiv 2606.16497 |
 
-> ⚠️ **口径不可混用**：fast@1 vs fast@1.2、best-of vs best-turn、≥1.0x vs ≥1.2x 必须各标定义。详见 docs/eval_calibre.md。
+> ⚠️ **口径不可混用**：fast@1 vs fast@1.2、best-of vs best-turn、≥1.0x vs ≥1.2x 必须各标定义。daVinci 双口径分开报：27.1% = L2 Fast@1.2，70.6% = L2 Fast@1，不得混用。
+
+**SFT v2 表述**：SFT v2 (distilled from the RL flywheel, ~10min LoRA): 65.0% ± 6.2pp (n=3) — statistically indistinguishable from the RL baseline at ~1% training cost; one run (72%) flagged as potential upside, post-release re-verification pending.
+
+> 📏 **测量条件**（205, 8×A800）：时钟 1155/1410MHz 自然 boost（无 CAP_SYS_ADMIN 不可锁频）；reference 分母 12-20% 机差为机器属性（与 dev1 相比），本报告全部数字在 205 单机内自洽；correctness 82.3% 对 TF32 reference 判定（TF32-ON 口径）。
 
 ---
 
@@ -99,7 +104,7 @@ python3 smoke_test.py http://<eval-server>:8004
 
 ## 开源状态
 
-✅ **独立副本已就位（2026-08-30）** — `kernelgym/` 评估引擎、`drkernel/` reward 实现、`evals/` 口径工具均为真实代码副本（非软链、非共享盘），排除：私有数据集、训练 checkpoint、内部日志、verl_patch 内部 overlay。发布清扫清单见 docs/RELEASE_CLEANLIST.md。
+✅ **独立副本已就位（2026-08-30）** — `kernelgym/` 评估引擎、`drkernel/` reward 实现、`evals/` 口径工具均为真实代码副本（非软链、非共享盘），排除：私有数据集、训练 checkpoint、内部日志、verl_patch 内部 overlay。
 
 > ⚠️ 训练栈（`main_grading.py` / verl 集成）依赖 [verl](https://github.com/verl-project/verl) 上游，未随仓库发布，需自行安装对齐版本。
 

@@ -2,7 +2,7 @@
 
 > 目标：让 14B 模型写出**正确且更快**的 Triton kernel，作为 MIT 开源、可复现、单机 8×A800 即可训练/评估的 RLVR 管线。
 > 分层定位：先立住"评估环境 + 诚实口径"这个可信根基，再强化性能轴，最后走向社区共建。
-> 相关：`docs/ARCHITECTURE.md`（结构）、`docs/eval_calibre.md` + `docs/CALIBER_TABLE.md`（口径）。
+> 相关：`docs/ARCHITECTURE.md`（结构）；口径细则见父仓内部文档（`eval_calibre.md` / `CALIBER_TABLE.md`）。
 
 ---
 
@@ -19,7 +19,7 @@
 - [ ] `evals/agg_eval.py` 锚定复核（含失败 turn 不入 speedup 纪律）
 - [ ] refcache=ON 下 gs300×3 重测，回填 README 结果表（TBD）
 - [ ] 交叉验证脚本（`compare_gs_eval.py` / `repro_pass_at_k.py`）只做验证，不产出决策数字
-- [ ] 补齐 `docs/CALIBER_TABLE.md` 待核项（Dr.Kernel 预算、daVinci Fast1 定义、CUDA Agent 基线）
+- [ ] 补齐父仓内部文档 `CALIBER_TABLE.md` 待核项（Dr.Kernel 预算、daVinci Fast1 定义、CUDA Agent 基线）
 
 ### 完成判据
 - 每个对外数字附四件套（脚本 SHA / 预算 / 提取器版本 / 口径版本）
@@ -55,7 +55,7 @@
 - 方向：
   - [ ] 提高性能 reward 权重 / 阈值（从 0.5/0.5 偏向性能），做性能杠杆 A/B
   - [ ] 性能 reward 上限 3.0 评估（当前训练可能只优化"够用即可"而非"快"）
-  - [ ] VeRPO / 性能面强化（参考 `eval_calibre.md` 的独立性能杠杆）
+  - [ ] VeRPO / 性能面强化（参考父仓内部文档 `eval_calibre.md` 的独立性能杠杆）
   - [ ] TF32 baseline 对齐（`ENABLE_TF32_BASELINE`，对齐 KernelBench-Verified 协议防高估）
 
 ### 更多后端
@@ -83,7 +83,7 @@
 3. **开放式比较基准**：统一 4 数报告 + 预算标注，让任何方法都能在相同口径下被公平比较。
 
 ### 动作
-- [ ] 发布独立副本 + 完整文档（已就位，见 RELEASE_CHECKLIST.md）
+- [ ] 发布独立副本 + 完整文档（已就位，见父仓内部文档 `RELEASE_CHECKLIST_oss_internal.md`）
 - [ ] 公开模型 + 数据 provenance + license
 - [ ] 社区 PR：多后端、新基准（KernelBench-Verified）、训练脚本可复现
 - [ ] CI / 测试矩阵（`pyproject.toml` 已含 pytest / ruff / mypy / pre-commit 骨架）

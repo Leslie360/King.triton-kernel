@@ -37,7 +37,7 @@
 
 ## 检查项
 
-- [ ] 未引入内部路径 / 私有数据 / checkpoint（发布清扫纪律, 见 docs/RELEASE_CLEANLIST.md）
+- [ ] 未引入内部路径 / 私有数据 / checkpoint（发布清扫纪律, 详见父仓内部文档 `RELEASE_CLEANLIST_oss_internal.md`）
 - [ ] 未混用评测口径
 - [ ] 文档已同步（如涉及 README / docs）
 

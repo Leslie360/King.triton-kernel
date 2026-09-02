@@ -21,14 +21,14 @@
 
 - **reference 分母固定**（`InMemoryReferenceCache`，key=uuid+ref_hash+is_valid）：判分不重跑 reference 分母，消除 run 级分母抖动。
 - 权威口径 = **per-problem best-of-history**（每题任一样本任一轮最优，跨全部轮次）。
-- **口径审计纪律**：对外数字必须附口径（指标/样本数/轮次/refcache 状态/脚本 SHA），禁止口径混用。详见 `docs/eval_calibre.md`。
+- **口径审计纪律**：对外数字必须附口径（指标/样本数/轮次/refcache 状态/脚本 SHA），禁止口径混用。细则见父仓内部文档 `eval_calibre.md`。
 
 ### 发布清扫
 
 - kernelgym/、drkernel/、evals/ 均为**真实代码副本**（非软链、非共享盘）。
 - 已排除：私有数据集、训练 checkpoint、内部日志、verl_patch 内部 overlay、内部路径/主机名。
 - 训练栈（verl 集成）依赖上游 verl，未随仓库发布，需自行安装对齐版本。
-- 详细清扫清单见 `docs/RELEASE_CLEANLIST.md`。
+- 详细清扫清单见父仓内部文档 `RELEASE_CLEANLIST_oss_internal.md`。
 
 ### 工程化治理
 
@@ -36,4 +36,4 @@
 - 新增 issue / PR 模板、CONTRIBUTING.md、SECURITY.md、CODE_OF_CONDUCT.md。
 - 数字口径：评测表 TBD（v2 口径 reference_cache=ON 重测中），见 README。
 
-[0.1.0]: https://github.com/<owner>/King.triton-kernel/releases/tag/v0.1.0
+[0.1.0]: https://github.com/<owner-org-or-user>/King.triton-kernel/releases/tag/v0.1.0

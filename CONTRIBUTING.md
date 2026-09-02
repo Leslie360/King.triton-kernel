@@ -120,13 +120,13 @@ ruff format --check .
 - 对比不同模型/方法时，**必须用同一口径**，否则禁止直接比较。
 - 修改 `evals/` 下任何口径聚合逻辑时，必须提供回归测试与前后对比说明。
 - 不要"挑选"口径来让数字更好看（如 fast@1 与 fast@1.2 混着报）。
-- 口径方法论细节见 `docs/eval_calibre.md`。
+- 口径方法论细则见父仓内部文档 `eval_calibre.md`。
 
 ---
 
 ## 6. 发布清扫纪律
 
-本仓库不包含：私有数据集、训练 checkpoint、内部日志、内部 overlay。提交代码前请自查（详见 `docs/RELEASE_CLEANLIST.md`）：
+本仓库不包含：私有数据集、训练 checkpoint、内部日志、内部 overlay。提交代码前请自查：
 
 - ❌ 不含绝对路径 / 内部主机名 / 内部 IP。
 - ❌ 不含 `.ckpt` / `.safetensors` / 日志 dump 等大文件。

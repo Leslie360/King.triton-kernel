@@ -8,7 +8,7 @@
 ## 0. 一句话定位
 
 让 14B 模型学会**分析 kernel → 写 Triton 实现 → 编译 → 在真实 GPU 上执行验证 → 按正确性与速度反馈迭代修复**。
-核心主张：**奖励"执行正确"，编译只是硬门槛**（`docs/core_insight_reward_execution.md`）。
+核心主张：**奖励"执行正确"，编译只是硬门槛**（详见父仓内部文档 `core_insight_reward_execution.md`）。
 
 ```
 SKILL 注入 ──► 修复飞轮 SFT ──► RLVR (TRLOO)
@@ -160,7 +160,7 @@ King.triton-kernel/
 
 ### 3.1 reward 计算（训练侧 / 评估侧一致口径）
 
-`eval_calibre.md` 给出核心 reward 映射：
+核心 reward 映射（口径细则见父仓内部文档 `docs/eval_calibre.md`）：
 
 | 结果 | reward | 说明 |
 |---|---|---|
@@ -194,14 +194,14 @@ King.triton-kernel/
 ### 4.3 为何如此设计
 
 1. **固定分母**：同题所有样本/轮次用同一个 reference_runtime → 分母抖动从 run 方差中剔除。
-2. **诚实**：对外数字不再因"这次 reference 慢"而虚高，消除 refcache=OFF 时 39% 与 refcache=ON 时 ~20-29% 的自相矛盾（发布红线，见 RELEASE_CHECKLIST.md）。
+2. **诚实**：对外数字不再因"这次 reference 慢"而虚高，消除 refcache=OFF 时 39% 与 refcache=ON 时 ~20-29% 的自相矛盾（发布红线，见父仓内部文档 `RELEASE_CHECKLIST_oss_internal.md`）。
 3. **口径可复现**：任何方法重测需在 refcache=ON 下进行，否则数字不可比。
 
 ---
 
 ## 5. 评测口径 — best-of-history 与失败 turn
 
-> 权威定义冻结于 `docs/CALIBER_TABLE.md`（K3 §23）。唯一权威实现 = `evals/agg_eval.py`。
+> 权威定义冻结于父仓内部文档 `docs/CALIBER_TABLE.md`。唯一权威实现 = `evals/agg_eval.py`。
 
 ### 5.1 权威指标
 
@@ -260,8 +260,9 @@ King.triton-kernel/
 | 文档 | 内容 |
 |---|---|
 | `README.md` | 顶层定位 / 安装 / 开源状态 |
-| `docs/core_insight_reward_execution.md` | 核心洞见：奖励执行而非编译（59% 案例） |
-| `docs/eval_calibre.md` | 口径定义 / 与基准对齐 / 4 数标准 |
-| `docs/CALIBER_TABLE.md`（父仓） | 对外数字唯一来源 / 权威口径冻结 |
-| `docs/RELEASE_CHECKLIST.md` | 发布前清扫 + 数字口径 + 来源行 |
+| `docs/ARCHITECTURE.md` | 本文件：架构 / 口径 / 分层边界 |
 | `docs/ROADMAP.md` | 当前 / 近期 / 中期 / 长期计划 |
+| 父仓内部文档：`core_insight_reward_execution.md` | 核心洞见：奖励执行而非编译 |
+| 父仓内部文档：`eval_calibre.md` | 口径定义 / 与基准对齐 / 4 数标准 |
+| 父仓内部文档：`CALIBER_TABLE.md` | 对外数字唯一来源 / 权威口径冻结 |
+| 父仓内部文档：`RELEASE_CHECKLIST_oss_internal.md` | 发布前清扫 + 数字口径 + 来源行 |

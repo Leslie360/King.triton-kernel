@@ -13,7 +13,8 @@
 
 发现安全漏洞请**不要**创建公开 issue。请通过以下方式私下报告：
 
-- **邮件**: `[INSERT_SECURITY_EMAIL]`（GPG 加密可选，公钥见 `[INSERT_KEY_URL]` 或维护者在项目主页公开的地址）
+
+- **邮件**: `2622507532@qq.com`
 - **GitHub 私有漏洞披露**: 使用 GitHub 的 [Security Advisory 功能](https://docs.github.com/en/code-security/security-advisories)（若已开启）发起私有漏洞报告。
 
 请在报告中尽量包含：
