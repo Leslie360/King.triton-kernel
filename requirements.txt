@@ -1,14 +1,20 @@
-# King.triton-kernel runtime deps
-# NOTE: torch/triton 版本下限必须与 pyproject.toml [project.dependencies] 保持一致.
-#       pyproject 是 pip 安装的权威来源; requirements.txt 是开发/部署的快捷安装.
-#       改动任一文件的 torch/triton 版本时请同步另一文件.
+# King.triton-kernel runtime dependencies
+# NOTE: version floors must stay in sync with pyproject.toml [project.dependencies].
+#       pyproject.toml is the authoritative source for pip metadata; this file is
+#       a convenience pin for dev/deploy installs. When you change a version floor
+#       in one file, update the other too.
 torch>=2.8
 triton>=3.4
+numpy
 vllm>=0.8.5
 verl  # RL training framework (see drkernel/verl_patch)
 ray
 fastapi
-redis
+uvicorn>=0.24
 pydantic>=2
+pydantic-settings
+redis
+aiohttp
+psutil
 pandas
 pyarrow

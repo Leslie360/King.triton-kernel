@@ -124,6 +124,21 @@ Protocol caveats:
 
 **Requirements**: Python ≥ 3.10, Linux + NVIDIA GPU (driver-visible is enough; CUDA ships with torch/triton), Redis.
 
+**Verified environment** (the exact stack on which all headline numbers and the 164-test suite were produced):
+
+| Component | Version / note |
+|---|---|
+| OS / node | Kubernetes pod `vllm-pd-16-*`, node `205` (10.199.126.205), 8×A800-SXM4-80GB |
+| Python | 3.10 (conda env `drkernel`) |
+| PyTorch | ≥ 2.8 (CUDA 12.1 via conda) |
+| Triton | ≥ 3.4 |
+| vLLM | ≥ 0.8.5 (async rollout) |
+| verl | upstream (see `drkernel/verl_patch`) |
+| Redis | ≥ 6.2 (grading broker) |
+| CUDA | 12.1 (driver-visible) |
+
+> Node `205` runs as a Kubernetes pod and may be recycled/re-scheduled; timed results are machine-bound and valid only for that node (see Measurement provenance above). The `scripts/launch_local.sh` smoke path only needs **one** GPU (`cuda:0`).
+
 ```bash
 # 1. Clone and install dependencies
 git clone https://github.com/Leslie360/King.triton-kernel.git
