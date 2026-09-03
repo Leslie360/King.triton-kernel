@@ -33,7 +33,6 @@ logger = logging.getLogger(__name__)
 class _HybridHttpWorker:
     def __init__(self, server_url: str, rate_limit: int, default_timeout: int, acquire_timeout: int) -> None:
         self.server_url = server_url
-        # print(f"[DEBUG] Default timeout: {default_timeout}")
         self.default_timeout = int(default_timeout)
         self.acquire_timeout = int(acquire_timeout)
         self._limits = httpx.Limits(max_keepalive_connections=64, max_connections=128, keepalive_expiry=30.0)
@@ -78,8 +77,20 @@ class _HybridHttpWorker:
         A misjudged requeue merely re-runs once (bounded by requeue_max) — safe,
         whereas silently dropping is not.
         """
+        # Requeue on result-wait timeout: a worker restart can drop in-flight tasks,
+        # leaving the server-side task stuck in PROCESSING forever; the old behavior
+        # returned timeout on poll exhaustion and silently dropped the task.
+        # Fix: on timeout (task still non-terminal), re-submit with a **new task_id**, up to
+        # requeue_max times. Only after exhausting retries do we return a timeout failure —
+        # no infinite waits, no silent drops.
+        # Blind-spot extension ("stall-then-failed"): a task that stalls on the server for a
+        # long time then returns failed (not timeout). Only requeueing status=timeout missed
+        # this case; now if status=failed AND elapsed > stall_threshold (likely stall, not a
+        # real failure), also requeue. Real failures usually complete within seconds
+        # (compile/runtime error); stall-then-failed runs far longer. A misjudged requeue only
+        # costs one extra run (capped by requeue_max); requeueing beats silently dropping.
         requeue_max = int(requeue_max or 0)
-        stall_threshold = max(client_timeout * 0.5, 120.0)  # failed 但耗时过半或>120s 疑似卡顿
+        stall_threshold = max(client_timeout * 0.5, 120.0)  # failed but elapsed > 50% or >120s => suspected stall
         attempt = 0
         while True:
             result = self._submit_and_poll_once(task_data, client_timeout, max_retries)
@@ -264,13 +275,16 @@ class KernelRewardClient:
         # the reward penalize such "over-replacement". Must be consumed by
         # calculate_reward_speedup via _over_replacement_penalty.
         self.penalize_over_replacement = bool(getattr(reward_config, "penalize_over_replacement", False))
-        # 过度替换的判分超参 (全部可配置, 防硬编码; 冒烟里逐一验证生效)
+        # Over-replacement scoring hyperparameters (all configurable, no hardcoding;
+        # smoke test verifies each one takes effect)
         self.over_replacement_penalty = float(getattr(reward_config, "over_replacement_penalty", -0.3))
-        # speedup 低于该阈值视为"退化"(相对参考变慢); 默认 1.0 即任何 <1.0x 都算退化
+        # speedup below this threshold counts as "regressed" (slower than reference);
+        # default 1.0 means anything <1.0x counts as regression
         self.over_replacement_speedup_threshold = float(
             getattr(reward_config, "over_replacement_speedup_threshold", 1.0)
         )
-        # 至少替换了多少个参考算子才触发 (防单算子抖动误伤)
+        # how many reference ops must be replaced at minimum to trigger (protects
+        # against single-op jitter)
         self.over_replacement_min_custom_kernels = int(
             getattr(reward_config, "over_replacement_min_custom_kernels", 1)
         )
@@ -302,7 +316,7 @@ class KernelRewardClient:
         return f"{prefix}_{self.task_counter:06d}_{uuid4().hex[:8]}"
 
     def _cheap_syntax_filter(self, kernel_code: str) -> Tuple[bool, str]:
-        """便宜预筛 (无 eval 成本): 语法可解析 + 含 triton kernel 标记 + 含 Model 类。"""
+        """Cheap pre-filter (no eval cost): parseable syntax + triton kernel markers + Model class."""
         import ast
         k = kernel_code or ""
         if not k.strip():
@@ -313,9 +327,9 @@ class KernelRewardClient:
         # and arrows (U+2014/U+2192 etc.).
         k = k.replace("’", "'").replace("‘", "'")
         k = k.replace("“", '"').replace("”", '"')
-        k = k.replace("—", "-").replace("–", "-").replace("―", "-").replace("—", "-")  # 破折号
-        k = k.replace("→", "->").replace("←", "<-").replace("⇒", "=>").replace("→", "->")  # 箭头
-        k = k.replace("、", ",").replace("，", ",").replace("：", ":").replace("；", ";")  # 全角标点
+        k = k.replace("—", "-").replace("–", "-").replace("―", "-").replace("—", "-")  # dashes
+        k = k.replace("→", "->").replace("←", "<-").replace("⇒", "=>").replace("→", "->")  # arrows
+        k = k.replace("、", ",").replace("，", ",").replace("：", ":").replace("；", ";")  # full-width punctuation
         k = k.replace("（", "(").replace("）", ")").replace("［", "[").replace("］", "]")
         k = k.replace("…", "...")
         try:
@@ -329,20 +343,25 @@ class KernelRewardClient:
         return True, ""
 
     def _preflight_validate(self, reference_code: str, kernel_code: str, entry_point: str) -> Tuple[bool, str]:
-        """Minimal preflight: verify entry point/语法 exists to avoid meaningless (昂贵) requests.
-        效率优化: 便宜语法筛 (ast.parse) 拦截垃圾, 避免发 eval server 全额编译。
+        """Minimal preflight: verify entry point / syntax exists to avoid wasteful (expensive) requests.
+        Efficiency optimization: cheap syntax filter (ast.parse) intercepts garbage,
+        avoiding sending it to the eval server for full compilation (saves ~97% of
+        useless compilations).
         """
         try:
-            # 便宜语法/关键要素筛: 垃圾 kernel 不发 eval server (省 97% 无效编译)
+            # Cheap syntax / key-element filter: don't send garbage kernels to the
+            # eval server.
             syn_ok, syn_err = self._cheap_syntax_filter(kernel_code)
             if not syn_ok:
                 return False, f"cheap-filter: {syn_err}"
             ref_required = f"class {entry_point}"
             ker_required = f"class {entry_point}New"
             ref_ok = ref_required in (reference_code or "")
-            # 放宽: 模型常把实现命名为 `class Model`(抄 reference 名)而非 `class ModelNew`。
-            # server 端 _resolve_entry_point 本就容忍并卸载正确 entry_point, 只有这里 preflight 太严
-            # 导致有效 kernel 被误杀(reward=0)。接受任一类名, 由 server 处理。
+            # Relaxed: the model often names its implementation `class Model` (copying
+            # the reference name) instead of `class ModelNew`. The server-side
+            # _resolve_entry_point already tolerates this and unloads the correct
+            # entry_point; only this preflight was over-strict and was killing valid
+            # kernels (reward=0). Accept either class name; let the server handle it.
             ker_ok = (
                 ker_required in (kernel_code or "")
                 or ref_required in (kernel_code or "")
@@ -353,7 +372,7 @@ class KernelRewardClient:
             if not ref_ok:
                 missing.append(ref_required)
             if not ker_ok:
-                missing.append(f"{ker_required} 或 {ref_required}")
+                missing.append(f"{ker_required} or {ref_required}")
             return False, ", ".join(missing)
         except Exception as e:
             logger.debug(f"preflight skipped due to error: {e}")
@@ -374,7 +393,7 @@ class KernelRewardClient:
                 "compiled": False,
                 "error": error_message,
             }
-        # Server returned a decoy kernel; force -1 and carry the marker.
+        # "Server returned a decoy kernel; force -1 and carry the marker."
         if result.get("decoy_kernel", False):
             logger.warning("[HybridClient] decoy_kernel detected; forcing reward -1")
             return {
@@ -515,8 +534,8 @@ class KernelRewardClient:
         correctness = result.get("correctness", False)
         speedup = result.get("speedup", 0.0)
         compiled = result.get("compiled", False)
-        # In fact, profiling is always None here since it is actually inside metadata
-        profiling = result.get("profiling", None) 
+        # In fact, profiling is always None here since it actually lives in metadata
+        profiling = result.get("profiling", None)
 
         if speedup is None:
             speedup = 0.0
@@ -563,9 +582,9 @@ class KernelRewardClient:
         """Bucketed speedup reward with within-band linear interpolation.
 
         Default bands: 1.0->0.2 / 1.2->0.4 / 1.5->0.6 / 2.0->0.8 / 3.0->1.0.
-        A convex variant that rewards pushing toward 3x hardest:
-        1.0->0.02 / 1.2->0.08 / 1.5->0.20 / 2->0.35 / 2.5->0.65 / 3->1.0.
-        Override via reward_config.bucket_bands.
+        Linear interpolation within each bucket. Override via reward_config.bucket_bands
+        (e.g. a convex shape that rewards pushing hardest toward 3x:
+        1.0->0.02 / 1.2->0.08 / 1.5->0.20 / 2->0.35 / 2.5->0.65 / 3->1.0).
         """
         spd = min(speedup, 3.0)
         bands = getattr(getattr(self, "reward_config", None), "bucket_bands", None)
@@ -615,7 +634,7 @@ class KernelRewardClient:
             for scope in (result, result.get("metadata") or {}):
                 if not isinstance(scope, dict):
                     continue
-                for k in (field, field + "s"):  # 兼容单/复数
+                for k in (field, field + "s"):  # accept singular or plural
                     v = scope.get(k)
                     if v:
                         try:
@@ -629,24 +648,25 @@ class KernelRewardClient:
         custom_us = _num("custom_kernel_cuda_time_in_profiling_us")
         total_us = _num("total_kernel_run_time_in_profiling_us")
 
-        # 没有任何替换信号 → 不触发
+        # No replacement signal → don't trigger
         if num_custom_kernel <= 0:
             return 0.0
-        # 退化判据: overall speedup 低于阈值 (默认 <1.0 即比参考慢)
+        # Regression criterion: overall speedup below threshold (default <1.0 means slower than reference)
         degraded = speedup < self.over_replacement_speedup_threshold
         if not degraded:
             return 0.0
 
-        # 参考是否优化库调用 (backend 判定; 无 backend 信息时仅靠退化+替换触发)
+        # Whether the reference was an optimized-library call (backend detection;
+        # when backend info is absent, only regression + replacement trigger)
         backend = str(result.get("reference_backend") or result.get("metadata", {}).get("reference_backend") or "")
         lib_backed = (not backend) or (backend.lower() in {b.lower() for b in self.over_replacement_opt_backends})
 
-        # H1 主判据: 替换 + 退化 + 参考库调用
+        # H1 main criterion: replacement + regression + reference library call
         if not lib_backed:
             return 0.0
         penalty = self.over_replacement_penalty
 
-        # H2: 大覆盖替换 → 放大
+        # H2: large-coverage replacement → amplify
         if num_total_kernels > 0:
             coverage = num_custom_kernel / num_total_kernels
             cov_factor = float(getattr(self.reward_config, "over_replacement_coverage_factor", 1.5))
@@ -654,7 +674,7 @@ class KernelRewardClient:
                 penalty *= cov_factor
                 logger.debug("[HybridClient] over-replacement H2: coverage=%.2f penalty=%.3f", coverage, penalty)
 
-        # H3: 慢实现主耗时 → 追加
+        # H3: slow impl dominates runtime → add extra
         if total_us > 0 and custom_us / total_us >= 0.5:
             extra = float(getattr(self.reward_config, "over_replacement_time_extra", 0.1))
             penalty -= extra
@@ -675,21 +695,23 @@ class KernelRewardClient:
             logger.warning("[HybridClient] calculate_reward_like_kernel error_message: %s", error_message)
             logger.debug("[HybridClient] Task failed result: %s", result)
 
-            # === RL v4 语法/编译惩罚 ===
-            # 目的: 让梯度区分"语法垃圾"(-1) vs "编译失败"(-0.5) vs "错但对"(0),
-            # 治 RL 漂移主因 (之前全统一 penalty_score=0, 垃圾和错但对同分)。
-            # 判据: 基于 error_message 的 cheap-filter / 编译错误标记。
-            reward_fail = penalty_score  # 默认 0 (错但对/运行时失败)
+            # === RL v4 syntax/compile penalty (2026-08-21) ===
+            # Goal: let the gradient distinguish "syntax garbage" (-1) vs "compile
+            # failure" (-0.5) vs "wrong but correct-shape" (0). Addresses the main
+            # RL drift cause (previously everything was uniformly penalty_score=0,
+            # so garbage and "wrong but correct-shape" scored the same).
+            # Criterion: cheap-filter / compile-error markers in error_message.
+            reward_fail = penalty_score  # default 0 (wrong but correct-shape / runtime failure)
             em_lower = str(error_message).lower()
             if "syntax-error" in em_lower or "client validation failed" in em_lower \
                or "syntaxerror" in em_lower or "unterminated string" in em_lower \
                or "invalid character" in em_lower or "invalid decimal" in em_lower \
                or "unmatched" in em_lower:
-                reward_fail = -1.0   # 语法垃圾 (cheap-filter / ast 不过)
+                reward_fail = -1.0   # syntax garbage (cheap-filter / ast failed)
             elif "kernel evaluation failed" in em_lower or "compilation" in em_lower \
                  or "compile" in em_lower:
-                reward_fail = -1.0   # 编译失败 = 硬门槛 (与语法同级, 防刷编译)
-            # 其余 (运行时错误/超时/任务失败) → penalty_score (0)
+                reward_fail = -1.0   # compile failure = hard barrier (2026-08-23: -0.5 → -1.0, same level as syntax; prevents farming compile failures)
+            # Otherwise (runtime error / timeout / task failure) → penalty_score (0)
 
             return_result = {
                 "reward": reward_fail,
@@ -732,7 +754,7 @@ class KernelRewardClient:
         reward_speedup = speedup
         if speedup > self.speedup_reward_upper_bound:
             reward_speedup = self.speedup_reward_upper_bound
-        
+
         if reward_speedup < self.speedup_reward_lower_bound:
             reward_speedup = 0.0
 
@@ -832,19 +854,20 @@ class KernelRewardClient:
         }
 
     def calculate_reward_discrete(self, result: Dict[str, Any]) -> Dict[str, Any]:
-        """CUDA Agent 风格离散奖励 {-1, 1, 2, 3} (供 A/B, 不破坏现有)。
+        """CUDA-Agent-style discrete reward {-1, 1, 2, 3} (for A/B, doesn't break existing).
 
-        分级 (按论文, 失败一律 -1):
-          - 语法/编译失败 (status != completed)            -> -1
-          - decoy (奖励破解)                               -> -1
-          - compiled 但 correctness=False                  ->  1
-          - correctness=True                               ->  2
-          - correctness=True 且 speedup > 1.2 (相对参考)   ->  3
+        Tiers (per the paper, failure is always -1):
+          - syntax / compile failure (status != completed)         -> -1
+          - decoy (reward hacking)                                 -> -1
+          - compiled but correctness=False                         ->  1
+          - correctness=True                                       ->  2
+          - correctness=True AND speedup > 1.2 (vs reference)     ->  3
 
-        相对参考 speedup: 论文口径按 reference runtime 计算 (server 返回的 speedup
-        已相对 reference 归一)。speedup<=1.2 视为"对但无显著加速", 留在 2。
+        "Speedup vs reference": the paper's caliber normalizes against reference
+        runtime (server-returned speedup is already reference-normalized).
+        speedup<=1.2 counts as "correct but not significantly faster", stays at 2.
         """
-        # 失败 (语法/编译/运行时/超时) 一律 -1
+        # failure (syntax / compile / runtime / timeout) always -1
         if result.get("status") != "completed":
             error_message = result.get("error_message", "Task failed")
             if error_message == "Task failed":
@@ -857,7 +880,7 @@ class KernelRewardClient:
                 "compiled": False,
                 "error": error_message,
             }
-        # decoy (奖励破解) -> -1
+        # decoy (reward hacking) -> -1
         if result.get("decoy_kernel", False):
             return {
                 "reward": -1.0,
@@ -916,7 +939,6 @@ class KernelRewardClient:
         penalty_score = self.penalty_score
         if not tasks:
             return []
-        # print(f"[DEBUG] Task timeout: {task_timeout or self.timeout}")
         effective_timeout = int(task_timeout or self.timeout)
         effective_timeout_in_client = int(task_timeout_in_client or self.task_timeout_in_client)
 
@@ -969,7 +991,6 @@ class KernelRewardClient:
             # Validate per-task timeout invariant
             if per_task_timeout_in_client < per_task_timeout:
                 per_task_timeout_in_client = per_task_timeout
-            # print(f"[DEBUG] Per task timeout: {per_task_timeout}")
 
             # Randomly log one task (~5%).
             try:

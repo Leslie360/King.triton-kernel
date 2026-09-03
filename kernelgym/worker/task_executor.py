@@ -1,13 +1,13 @@
 """
-Task Executor with Subprocess Isolation
-任务执行器 - 使用subprocess完全隔离CUDA Error
+Task Executor with Subprocess Isolation.
 
-这个模块提供完全隔离的任务执行能力：
-1. 每个任务在独立的subprocess中执行
-2. 使用spawn context确保不继承CUDA状态
-3. 每个subprocess直接使用分配的GPU设备（cuda:0, cuda:1等）
-4. CUDA Error只影响当前subprocess，不会影响主进程或其他子进程
-5. 支持torch.profiler（在subprocess中启用）
+This module provides fully isolated task execution:
+1. Each task runs in its own subprocess
+2. Uses the spawn context to avoid inheriting CUDA state
+3. Each subprocess directly uses its assigned GPU device (cuda:0, cuda:1, ...)
+4. CUDA errors affect only the current subprocess, never the main process or
+   other subprocesses
+5. Supports torch.profiler (enabled inside the subprocess)
 
 Author: KernelGym Team
 Date: 2025-10-29
@@ -28,33 +28,33 @@ logger = logging.getLogger("kernelgym.task_executor")
 
 @dataclass
 class TaskExecutionMetrics:
-    """任务执行指标"""
-    subprocess_spawn_time: float  # subprocess启动时间
-    task_execution_time: float    # 任务执行时间
-    total_time: float              # 总时间
-    profiling_overhead: float = 0.0  # profiling开销（如果启用）
+    """Task-execution metrics."""
+    subprocess_spawn_time: float  # subprocess startup time
+    task_execution_time: float    # task execution time
+    total_time: float             # total time
+    profiling_overhead: float = 0.0  # profiling overhead (if enabled)
     success: bool = True
     error_type: Optional[str] = None
 
 
 class IsolatedTaskExecutor:
     """
-    完全隔离的任务执行器
-    
-    核心特性：
-    1. 每个任务在新的subprocess中执行（spawn模式）
-    2. CUDA Error完全隔离，不影响主进程
-    3. 支持torch.profiler（在subprocess中启用）
-    4. 完整的错误处理和超时机制
-    5. GPU资源自动清理
-    
-    设计原则：
-    - 主进程不使用CUDA
-    - Subprocess在spawn后初始化CUDA，直接使用分配的GPU设备
-    - Profiler在subprocess中启用（可选）
-    - 所有数据通过Queue传递
+    Fully isolated task executor.
+
+    Core features:
+    1. Each task runs in a fresh subprocess (spawn mode)
+    2. CUDA errors are fully isolated, never affecting the main process
+    3. Supports torch.profiler (enabled inside the subprocess)
+    4. Complete error handling and timeout mechanism
+    5. Automatic GPU-resource cleanup
+
+    Design principles:
+    - The main process never uses CUDA
+    - The subprocess initializes CUDA after spawn and uses its assigned GPU device
+    - The profiler runs inside the subprocess (optional)
+    - All data is passed via Queues
     """
-    
+
     @staticmethod
     def execute_task(
         task_data: Dict[str, Any],
@@ -62,57 +62,57 @@ class IsolatedTaskExecutor:
         timeout: int = 60,
     ) -> Tuple[Dict[str, Any], TaskExecutionMetrics]:
         """
-        在隔离的subprocess中执行通用任务（toolkit + backend）
+        Execute a generic task (toolkit + backend) in an isolated subprocess.
 
         Args:
-            task_data: task payload 字典（必须包含 toolkit 与 backend_adapter）
-            device_id: GPU设备ID（物理ID，如0-7）
-            timeout: 超时时间（秒）
+            task_data: Task payload dict (must include toolkit and backend_adapter).
+            device_id: Physical GPU device id (e.g. 0-7).
+            timeout: Timeout in seconds.
 
         Returns:
-            (result_dict, metrics): 结果字典和执行指标
+            (result_dict, metrics): The result dict and execution metrics.
 
         Raises:
-            TimeoutError: 任务超时
-            RuntimeError: 任务执行失败
+            TimeoutError: Task timed out.
+            RuntimeError: Task execution failed.
         """
         start_time = time.time()
-        
-        # 创建spawn context的进程
+
+        # Create a process with the spawn context
         ctx = mp.get_context('spawn')
         result_queue = ctx.Queue()
         spawn_start = time.time()
-        
+
         process = ctx.Process(
             target=_toolkit_worker,
             args=(task_data, device_id, result_queue),
         )
-        
+
         process.start()
         spawn_time = time.time() - spawn_start
-        
+
         try:
-            # 等待结果
+            # Wait for the result
             exec_start = time.time()
             result_data = result_queue.get(timeout=timeout)
             exec_time = time.time() - exec_start
-            
-            # 获取profiling数据（如果有）
-            # 等待进程结束
+
+            # Fetch profiling data (if any)
+            # Wait for the process to end
             process.join(timeout=5)
             if process.is_alive():
                 logger.warning("Process did not terminate, forcing kill")
                 process.terminate()
                 process.join(timeout=2)
-            
+
             total_time = time.time() - start_time
-            
-            # 检查结果
+
+            # Check the result
             if not result_data.get('success', False):
-                # 任务失败
+                # Task failed
                 error_type = result_data.get('error_type', 'Unknown')
                 error_message = result_data.get('error_message', 'Unknown error')
-                
+
                 metrics = TaskExecutionMetrics(
                     subprocess_spawn_time=spawn_time,
                     task_execution_time=exec_time,
@@ -120,17 +120,17 @@ class IsolatedTaskExecutor:
                     success=False,
                     error_type=error_type
                 )
-                
+
                 raise RuntimeError(f"{error_type}: {error_message}")
-            
-            # 任务成功
+
+            # Task succeeded
             result = result_data['result']
-            
-            # 计算profiling开销
+
+            # Compute profiling overhead
             profiling_overhead = 0.0
             if task_data.get("enable_profiling"):
-                profiling_overhead = exec_time * 0.1  # 粗略估计
-            
+                profiling_overhead = exec_time * 0.1  # rough estimate
+
             metrics = TaskExecutionMetrics(
                 subprocess_spawn_time=spawn_time,
                 task_execution_time=exec_time,
@@ -138,22 +138,22 @@ class IsolatedTaskExecutor:
                 profiling_overhead=profiling_overhead,
                 success=True
             )
-            
+
             logger.info(
                 f"Task {task_data.get('task_id', 'unknown')} completed: "
                 f"spawn={spawn_time:.3f}s, exec={exec_time:.3f}s, total={total_time:.3f}s"
             )
-            
+
             return result, metrics
-            
+
         except queue.Empty:
-            # 超时
+            # Timeout
             process.terminate()
             process.join(timeout=2)
             if process.is_alive():
                 process.kill()
                 process.join()
-            
+
             total_time = time.time() - start_time
             metrics = TaskExecutionMetrics(
                 subprocess_spawn_time=spawn_time,
@@ -162,33 +162,33 @@ class IsolatedTaskExecutor:
                 success=False,
                 error_type='TimeoutError'
             )
-            
+
             raise TimeoutError(
                 f"Task {task_data.get('task_id', 'unknown')} timeout after {timeout}s"
             )
-            
+
         except Exception as e:
-            # 其他错误
+            # Other errors
             process.terminate()
             process.join(timeout=2)
             if process.is_alive():
                 process.kill()
                 process.join()
-            
+
             logger.error(f"Task execution failed: {e}")
             raise
-            
+
         finally:
-            # 确保进程被清理
+            # Ensure the process is cleaned up
             if process.is_alive():
                 process.terminate()
                 process.join(timeout=2)
                 if process.is_alive():
                     process.kill()
-    
+
 
 # ============================================================================
-# Subprocess Worker Functions (模块级别，可以被pickle)
+# Subprocess Worker Functions (module-level so they can be pickled)
 # ============================================================================
 
 def _toolkit_worker(

@@ -7,51 +7,53 @@ assignees: ""
 ---
 
 <!--
-感谢报告 bug。请尽量补全以下信息，特别是"评测口径"部分——
-本项目对评测口径（fast@1 vs fast@1.2、best-of vs best-turn、refcache 状态）非常敏感，
-口径不明会导致无法复现与定位。
+Thanks for reporting a bug. Please fill in as much of the following as possible,
+especially the "Evaluation Caliber" section — this project is highly sensitive to
+evaluation calibers (fast@1 vs fast@1.2, best-of vs best-turn, refcache state);
+unclear calibers make reproduction and diagnosis impossible.
 -->
 
-## 描述
+## Description
 
-<!-- 清晰、简洁地描述 bug 是什么。 -->
+<!-- A clear and concise description of the bug. -->
 
-## 复现步骤
+## Steps to Reproduce
 
-1. 执行命令 / 脚本：
+1. Command / script executed:
    ```bash
-   # 粘贴最小复现命令
+   # paste the minimal reproduction command
    ```
-2. 输入 / 配置：
-3. 观察到的结果：
+2. Input / configuration:
+3. Observed result:
 
-## 期望行为
+## Expected Behavior
 
-<!-- 你期望发生什么？ -->
+<!-- What you expected to happen. -->
 
-## 实际行为
+## Actual Behavior
 
-<!-- 实际发生了什么？贴出报错堆栈 / 日志片段。 -->
+<!-- What actually happened. Paste the error stack / log fragments. -->
 
-## 环境
+## Environment
 
-- **OS**: （如 Ubuntu 22.04）
-- **Python 版本**: （如 3.10.14）
-- **torch 版本**: （如 2.4.0，`python -c "import torch; print(torch.__version__)"`）
-- **triton 版本**: （如 3.0.0，`python -c "import triton; print(triton.__version__)"`）
-- **GPU / 驱动**: （如 A800 / CUDA 12.4；`nvidia-smi`）
-- **是否使用 reference_cache**: （ON / OFF）
-- **verl / vllm 版本**（若与训练侧相关）:
+- **OS**: (e.g., Ubuntu 22.04)
+- **Python version**: (e.g., 3.10.14)
+- **torch version**: (e.g., 2.4.0, `python -c "import torch; print(torch.__version__)"`)
+- **triton version**: (e.g., 3.0.0, `python -c "import triton; print(triton.__version__)"`)
+- **GPU / driver**: (e.g., A800 / CUDA 12.4; `nvidia-smi`)
+- **reference_cache**: (ON / OFF)
+- **verl / vllm version** (if training-side related):
 
-## 评测口径（如涉及数字）
+## Evaluation Caliber (if numbers are involved)
 
-<!-- 若 bug 涉及正确率/速度等数字, 请务必标注口径, 否则按"口径不明"处理: -->
-- 指标: （sample_solve_rate / correctness / fast@1 / fast@1.2 / 其他）
-- 采样方式: （best-of N / best-turn / greedy）
-- 轮次范围: （如 5 轮修复全轮次 / 仅最终轮）
-- speedup 阈值: （≥1.0x / ≥1.2x / 其他）
-- 口径工具脚本 SHA: （若用到 evals/agg_eval.py 等）
+<!-- If the bug involves correctness/speed numbers, the caliber must be stated;
+otherwise it will be treated as "caliber unclear": -->
+- Metric: (sample_solve_rate / correctness / fast@1 / fast@1.2 / other)
+- Sampling: (best-of N / best-turn / greedy)
+- Turn range: (e.g., all 5 repair turns / final turn only)
+- Speedup threshold: (≥1.0x / ≥1.2x / other)
+- Caliber tooling script SHA: (if using evals/agg_eval.py etc.)
 
-## 额外上下文
+## Additional Context
 
-<!-- 截图、相关 issue/PR、任何你觉得有用的信息。 -->
+<!-- Screenshots, related issues/PRs, anything else useful. -->

@@ -208,10 +208,13 @@ class KernelBenchToolkit(Toolkit):
                     task.reference_backend,
                 )
 
-            # 2026-08-29 P0 深修(K3 §20 Q2): reference 计时 median-of-3
-            # 根因: gs300 方差 std=23.6, 同一 reference 不同 run 差 42%(机器级抖动/锁频/热/邻居负载)。
-            # 单轮 mean(num_perf_trials 次采样平均)压不住跨 run 抖动。
-            # 改: 3 次独立整轮计时取中位(非单轮内取中位, 是 3 个整轮 mean 的中位)。
+            # 2026-08-29 P0 deep fix (K3 §20 Q2): reference timing uses median-of-3.
+            # Root cause: gs300 variance std=23.6; the same reference differs by 42%
+            # across runs (machine-level jitter / locked clocks / heat / neighbor load).
+            # A single pass of mean (averaging num_perf_trials samples) cannot tame
+            # cross-run jitter.
+            # Fix: take the median of 3 independent full-round timings (not the median
+            # within a round — the median of 3 full-round means).
             _N_REF_TRIALS = 3
             _runtimes_raw = []
             for _ in range(_N_REF_TRIALS):

@@ -13,8 +13,9 @@
 # limitations under the License.
 
 """
-Kernel 提示生成工具
-专门用于生成 kernel 代码的提示模板
+Kernel prompt-generation utilities.
+
+Specialized prompt templates for generating kernel code.
 """
 
 from typing import Dict, List, Any, Optional
@@ -29,26 +30,26 @@ def generate_kernel_prompt(
     performance_target: Optional[str] = None
 ) -> str:
     """
-    生成 kernel 优化提示
-    
+    Generate a kernel-optimization prompt.
+
     Args:
-        task_type: 任务类型 (e.g., "element_wise", "reduction", "matrix_mult")
-        reference_code: 参考 PyTorch 实现
-        operation_name: 操作名称
-        input_shapes: 输入张量形状
-        constraints: 约束条件
-        performance_target: 性能目标
-        
+        task_type: Task type (e.g., "element_wise", "reduction", "matrix_mult").
+        reference_code: Reference PyTorch implementation.
+        operation_name: Operation name.
+        input_shapes: Input tensor shapes.
+        constraints: Constraint conditions.
+        performance_target: Performance target.
+
     Returns:
-        格式化的提示字符串
+        The formatted prompt string.
     """
     prompt_parts = []
-    
-    # 标题
+
+    # Title
     prompt_parts.append(f"# CUDA Kernel Optimization Task: {operation_name}")
     prompt_parts.append("")
-    
-    # 任务描述
+
+    # Task description
     task_descriptions = {
         "element_wise": "Optimize element-wise operations for better memory access patterns and parallelization.",
         "reduction": "Implement efficient reduction operations with proper shared memory usage and warp-level primitives.",
@@ -56,42 +57,42 @@ def generate_kernel_prompt(
         "convolution": "Implement efficient convolution operations with optimal memory layout and computation patterns.",
         "attention": "Optimize attention mechanisms with fused operations and memory-efficient implementations."
     }
-    
+
     description = task_descriptions.get(task_type, "Optimize the given operation for better GPU performance.")
     prompt_parts.append("## Task Description")
     prompt_parts.append(description)
     prompt_parts.append("")
-    
-    # 参考实现
+
+    # Reference implementation
     prompt_parts.append("## Reference PyTorch Implementation")
     prompt_parts.append("```python")
     prompt_parts.append(reference_code)
     prompt_parts.append("```")
     prompt_parts.append("")
-    
-    # 输入信息
+
+    # Input information
     if input_shapes:
         prompt_parts.append("## Input Information")
         for i, shape in enumerate(input_shapes):
             prompt_parts.append(f"- Input {i+1}: {shape}")
         prompt_parts.append("")
-    
-    # 约束条件
+
+    # Constraint conditions
     if constraints:
         prompt_parts.append("## Constraints")
         for key, value in constraints.items():
             prompt_parts.append(f"- {key}: {value}")
         prompt_parts.append("")
-    
-    # 性能目标
+
+    # Performance target
     if performance_target:
         prompt_parts.append("## Performance Target")
         prompt_parts.append(f"- {performance_target}")
         prompt_parts.append("")
-    
-    # 优化指导
+
+    # Optimization guidelines
     prompt_parts.append("## Optimization Guidelines")
-    
+
     if task_type == "element_wise":
         prompt_parts.extend([
             "- Ensure coalesced memory access patterns",
@@ -120,10 +121,10 @@ def generate_kernel_prompt(
             "- Minimize shared memory conflicts",
             "- Use appropriate synchronization primitives"
         ])
-    
+
     prompt_parts.append("")
-    
-    # 生成任务
+
+    # Generation task
     prompt_parts.append("## Your Task")
     prompt_parts.append("Generate an optimized CUDA kernel implementation that:")
     prompt_parts.append("1. Achieves significantly better performance than the reference")
@@ -132,8 +133,8 @@ def generate_kernel_prompt(
     prompt_parts.append("4. Includes proper error handling")
     prompt_parts.append("5. Is well-documented with clear comments")
     prompt_parts.append("")
-    
-    # 期望输出格式
+
+    # Expected output format
     prompt_parts.append("## Expected Output Format")
     prompt_parts.append("```python")
     prompt_parts.append("import torch")
@@ -152,19 +153,19 @@ def generate_kernel_prompt(
     prompt_parts.append("    # Your wrapper code here")
     prompt_parts.append("    return result")
     prompt_parts.append("```")
-    
+
     return "\n".join(prompt_parts)
 
 
 def extract_kernel_requirements(prompt: str) -> Dict[str, Any]:
     """
-    从提示中提取 kernel 要求
-    
+    Extract kernel requirements from the prompt.
+
     Args:
-        prompt: 提示字符串
-        
+        prompt: The prompt string.
+
     Returns:
-        提取的要求字典
+        The extracted requirements dict.
     """
     requirements = {
         "task_type": "general",
@@ -174,8 +175,8 @@ def extract_kernel_requirements(prompt: str) -> Dict[str, Any]:
         "input_shapes": [],
         "optimization_guidelines": []
     }
-    
-    # 提取任务类型
+
+    # Extract task type
     if "element_wise" in prompt.lower():
         requirements["task_type"] = "element_wise"
     elif "reduction" in prompt.lower():
@@ -186,23 +187,23 @@ def extract_kernel_requirements(prompt: str) -> Dict[str, Any]:
         requirements["task_type"] = "convolution"
     elif "attention" in prompt.lower():
         requirements["task_type"] = "attention"
-    
-    # 提取操作名称
+
+    # Extract operation name
     import re
     name_pattern = r"# CUDA Kernel Optimization Task: (.+)"
     name_match = re.search(name_pattern, prompt)
     if name_match:
         requirements["operation_name"] = name_match.group(1).strip()
-    
-    # 检查是否有约束条件
+
+    # Check whether constraints are present
     if "## Constraints" in prompt:
         requirements["has_constraints"] = True
-    
-    # 检查是否有性能目标
+
+    # Check whether a performance target is present
     if "## Performance Target" in prompt:
         requirements["has_performance_target"] = True
-    
-    # 提取输入形状信息
+
+    # Extract input-shape information
     input_pattern = r"## Input Information\s*\n(.*?)(?=\n##|\n$)"
     input_match = re.search(input_pattern, prompt, re.DOTALL)
     if input_match:
@@ -210,7 +211,7 @@ def extract_kernel_requirements(prompt: str) -> Dict[str, Any]:
         for line in input_lines:
             if line.strip().startswith('-'):
                 requirements["input_shapes"].append(line.strip()[1:].strip())
-    
+
     return requirements
 
 
@@ -220,33 +221,33 @@ def create_kernel_evaluation_prompt(
     test_inputs: Optional[List[str]] = None
 ) -> str:
     """
-    创建 kernel 评估提示
-    
+    Build a kernel-evaluation prompt.
+
     Args:
-        original_code: 原始参考代码
-        optimized_code: 优化后的代码
-        test_inputs: 测试输入
-        
+        original_code: Original reference code.
+        optimized_code: Optimized code.
+        test_inputs: Test inputs.
+
     Returns:
-        评估提示字符串
+        The evaluation prompt string.
     """
     prompt_parts = []
-    
+
     prompt_parts.append("# Kernel Performance Evaluation")
     prompt_parts.append("")
-    
+
     prompt_parts.append("## Original Reference Code")
     prompt_parts.append("```python")
     prompt_parts.append(original_code)
     prompt_parts.append("```")
     prompt_parts.append("")
-    
+
     prompt_parts.append("## Optimized Kernel Code")
     prompt_parts.append("```python")
     prompt_parts.append(optimized_code)
     prompt_parts.append("```")
     prompt_parts.append("")
-    
+
     if test_inputs:
         prompt_parts.append("## Test Inputs")
         for i, test_input in enumerate(test_inputs):
@@ -255,11 +256,11 @@ def create_kernel_evaluation_prompt(
             prompt_parts.append(test_input)
             prompt_parts.append("```")
             prompt_parts.append("")
-    
+
     prompt_parts.append("## Evaluation Criteria")
     prompt_parts.append("1. **Correctness**: Does the optimized kernel produce the same results?")
     prompt_parts.append("2. **Performance**: How much speedup is achieved?")
     prompt_parts.append("3. **Memory Usage**: Is memory usage optimized?")
     prompt_parts.append("4. **Code Quality**: Is the code well-structured and documented?")
-    
+
     return "\n".join(prompt_parts)

@@ -589,9 +589,11 @@ def eval_reference_only(
     backend_adapter: Optional[Any] = None,
 ) -> KernelExecResult:
     assert torch.cuda.is_available(), "CUDA is not available, cannot run Eval"
-    # 2026-08-26 TF32 baseline 开关 (KernelBench-Verified 协议对齐):
-    # reference 默认跑纯 FP32 eager, candidate 走 tensor core → speedup 系统性高估。
-    # 设 ENABLE_TF32_BASELINE=True 让 reference 也用 TF32。默认关(保持现口径)。
+    # 2026-08-26 TF32-baseline switch (aligned with the KernelBench-Verified protocol):
+    # the reference runs pure FP32 eager by default, while the candidate runs on
+    # tensor cores → speedup is systematically overestimated.
+    # Set ENABLE_TF32_BASELINE=True so the reference also uses TF32. Default off
+    # (keeps the current caliber).
     if os.environ.get("ENABLE_TF32_BASELINE", "False").lower() == "true":
         torch.backends.cuda.matmul.allow_tf32 = True
         torch.backends.cudnn.allow_tf32 = True

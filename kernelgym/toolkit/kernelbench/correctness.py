@@ -95,7 +95,8 @@ def run_and_check_correctness(
                         compiled=True, correctness=False, metadata=metadata
                     )
 
-                # 兼容 bool tensor：先做 float 差分，避免 bool 不支持减法
+                # Handle bool tensors: cast to float before diffing, since bool
+                # does not support subtraction
                 output_f = output.to(torch.float32)
                 output_new_f = output_new.to(torch.float32)
                 if not torch.allclose(output_f, output_new_f, atol=1e-02, rtol=1e-02):

@@ -1,13 +1,13 @@
 NOTICE
 ======
 
-King.triton-kernel — 开源组件合规声明
+King.triton-kernel — Open-source component compliance statement
 
-本仓库根目录 LICENSE 为 MIT License（Copyright (c) 2026 King.triton-kernel contributors）。
+The LICENSE at the repository root is the MIT License (Copyright (c) 2026 King.triton-kernel contributors).
 
-`drkernel/kernel/` 下以下文件源自 ByteDance Ltd. 及其关联公司（verl / Dr.Kernel
-生态），保留 Apache License 2.0 版权头（Copyright 2025 Bytedance Ltd. and/or its
-affiliates）：
+The following files under `drkernel/kernel/` originate from ByteDance Ltd. and its affiliates (the verl /
+Dr.Kernel ecosystem) and retain their Apache License 2.0 copyright headers (Copyright 2025 Bytedance Ltd.
+and/or its affiliates):
 
 - drkernel/kernel/rewards/__init__.py
 - drkernel/kernel/rewards/kernel_reward.py
@@ -16,8 +16,9 @@ affiliates）：
 - drkernel/kernel/data/dataset_utils.py
 - drkernel/kernel/data/kernel_prompts.py
 
-按 Apache License 2.0 §4 与 MIT 兼容性，上述文件继续以 Apache-2.0 授权，
-保留原版权声明，不在修改后另行主张。Apache License 2.0 全文见：
+Per Apache License 2.0 §4 and MIT compatibility, the above files remain licensed under Apache-2.0,
+retain their original copyright notices, and assert no additional claims after modification.
+The full text of Apache License 2.0 is available at:
 https://www.apache.org/licenses/LICENSE-2.0
 
-其余部分（kernelgym/、evals/、docs/、根脚本）为 MIT。
+All other parts (kernelgym/, evals/, docs/, root scripts) are MIT.

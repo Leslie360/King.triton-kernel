@@ -1,4 +1,4 @@
-# 私有数据/产物（不开源）
+# Private data / artifacts (not open-sourced)
 w3_results/
 KernelGYM/drkernel/checkpoints/
 KernelGYM/drkernel/outputs/
@@ -12,7 +12,7 @@ models/
 *.pt
 *.log
 
-# Python / 测试 / 构建缓存（工程化排除）
+# Python / tests / build caches
 __pycache__/
 *.pyc
 *.pyo
@@ -31,7 +31,7 @@ dist/
 build/
 *.whl
 
-# 编辑器/系统
+# Editors / OS
 .DS_Store
 .idea/
 .vscode/

@@ -78,7 +78,7 @@ def test_agg_eval_sample_solve_and_fast12(tmp_path):
     # per-run line for run "1"
     line = next(l for l in out.splitlines() if l.startswith("  1:"))
     # 4 problems, 6 samples total (4 correct: p0s0,p1s0,p1s1,p3s0) -> 66.7%
-    assert "题=4" in line, line
+    assert "problems=4" in line, line
     assert "sample=6" in line, line
     assert "sample_solve=66.7%" in line, line
     # fast@1.2 best-of: problems with any correct sample at speedup>=1.2:
@@ -101,14 +101,14 @@ def test_agg_eval_multirun_mean_std(tmp_path):
 def test_agg_eval_missing_run_reports_no_data(tmp_path):
     base = _build_tree(tmp_path)
     out = _run_agg(base, ["1", "999"])
-    assert "999: 无数据" in out
+    assert "999: no data" in out
 
 
 def test_agg_eval_single_run_no_mean_section(tmp_path):
     # mean/std summary only printed when >= 2 runs
     base = _build_tree(tmp_path)
     out = _run_agg(base, ["1"])
-    assert "均值/方差" not in out
+    assert "mean/std" not in out
 
 
 def test_agg_eval_incorrect_only_problem_excluded_from_fast(tmp_path):

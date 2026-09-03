@@ -2,8 +2,9 @@
 
 Covers:
 - validate_code: empty / missing class / present.
-- early_kernel_validation: 缺 class, 语法错误, 缺 import, cuda backend 缺标记,
-  unicode(弯引号/全角标点) 归一化, 合法 triton kernel 通过。
+- early_kernel_validation: missing class, syntax errors, missing imports, cuda
+  backend missing indicator, unicode (curly quotes / full-width punctuation)
+  normalization, and a valid triton kernel passing.
 """
 
 from __future__ import annotations

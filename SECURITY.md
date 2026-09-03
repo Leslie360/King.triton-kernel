@@ -1,58 +1,55 @@
-# 安全策略（Security Policy）
+# Security Policy
 
-> ⚠️ **本项目涉及代码执行（Triton kernel 在真实 GPU 上编译与运行）。** 未经审计的 kernel 代码、不可信的 prompt、或外部注入的输入都可能触发任意代码执行、非法内存访问或资源耗尽。请把本项目产出的任何 kernel 与输入都视为**不可信**，只在隔离环境中执行。
+> ⚠️ **This project involves code execution (Triton kernels are compiled and run on real GPUs).** Unaudited kernel code, untrusted prompts, or externally injected inputs can trigger arbitrary code execution, illegal memory access, or resource exhaustion. Treat any kernel and any input produced by this project as **untrusted**, and execute only in isolated environments.
 
-## 支持的版本
+## Supported Versions
 
-| 版本 | 支持状态 |
+| Version | Status |
 |------|----------|
-| 0.1.x | ✅ 活跃维护 |
-| 其他 | ❌ 不维护 |
+| 0.1.x | ✅ actively maintained |
+| other | ❌ unsupported |
 
-## 漏洞报告渠道
+## Reporting a Vulnerability
 
-发现安全漏洞请**不要**创建公开 issue。请通过以下方式私下报告：
+Please **do not** open a public issue for security vulnerabilities. Report privately via:
 
+- **Email**: `2622507532@qq.com`
+- **GitHub private vulnerability disclosure**: use GitHub's [Security Advisory feature](https://docs.github.com/en/code-security/security-advisories) (if enabled) to file a private report.
 
-- **邮件**: `2622507532@qq.com`
-- **GitHub 私有漏洞披露**: 使用 GitHub 的 [Security Advisory 功能](https://docs.github.com/en/code-security/security-advisories)（若已开启）发起私有漏洞报告。
+Please include, as much as possible:
 
-请在报告中尽量包含：
+1. Vulnerability type and impact scope (remotely triggerable? arbitrary code execution?).
+2. Reproduction path (minimal triggering kernel / input / configuration).
+3. Affected modules and versions.
+4. If you have confirmed a kernel or input can execute arbitrary code without authorization, prefer private disclosure and **pause public sharing** until fixed.
 
-1. 漏洞类型与影响范围（是否可远程触发、是否可造成任意代码执行）。
-2. 复现路径（最小触发 kernel / 输入 / 配置）。
-3. 受影响的模块与版本。
-4. 若你已确认某条 kernel 或输入能在未被授权的情况下执行任意代码，请优先走私有披露并**暂停公开传播**。
+## Response Commitments
 
-## 响应承诺
-
-本项目团队对安全漏洞报告承诺如下时间表：
-
-| 响应阶段 | 时间 |
+| Stage | Target |
 |----------|------|
-| 确认收到报告 | 5 个工作日内 |
-| 初步分类与严重性评估（CVSS） | 10 个工作日内 |
-| 修复发布（严重/高危） | 30 天内目标（视复杂度可延长并同步进度） |
-| 修复发布（中危） | 60 天内目标 |
-| 低危 / 最佳实践建议 | 纳入常规迭代，不单独承诺 SLA |
+| Acknowledge report | within 5 business days |
+| Initial triage & severity assessment (CVSS) | within 10 business days |
+| Fix release (critical/high) | within 30 days (extendable with progress updates) |
+| Fix release (medium) | within 60 days |
+| Low / best-practice advisories | folded into regular releases, no separate SLA |
 
-所有已确认的漏洞在修复发布前**不公开披露**，以便用户有时间升级。修复后按需发布安全公告。
+Confirmed vulnerabilities are **not publicly disclosed** before the fix is released, giving users time to upgrade. Security advisories are published after fixes as needed.
 
-## 针对本项目的特别提示（代码执行面）
+## Project-Specific Notes (code-execution surface)
 
-本项目是"kernel 生成 RLVR"管线，其安全面与普通库不同：
+This project is a kernel-generation RLVR pipeline; its security surface differs from an ordinary library:
 
-- **评估环境（kernelgym/）** 会 fork 子进程池来编译并执行生成的 kernel。任何从模型 / 外部输入的 Triton 代码都在此环境中运行——请确保：
-  - 评估 / 判分 server 运行在**受限容器或 VM** 中，不持有宿主机敏感权限。
-  - 不对**不可信来源**开放判分 server 端口（默认 8004）。
-- **训练侧（drkernel/ verl 集成）** 涉及模型输出直接进入执行环境，属于高风险路径，同上述隔离要求。
-- 若你在 kernel 内发现可造成宿主机逃逸、权限提升、或非预期文件/网络访问的路径，请按"严重"级别优先报告。
+- **The evaluation environment (`kernelgym/`)** forks subprocess pools to compile and execute generated kernels. Any Triton code from model / external input runs inside this environment — please ensure:
+  - The evaluation / grading server runs in a **restricted container or VM** without sensitive host privileges.
+  - The grading server port (default 10907) is not exposed to **untrusted networks**.
+- **The training side (`drkernel/` verl integration)** feeds model output directly into the execution environment — a high-risk path subject to the same isolation requirements.
+- If you discover a path enabling host escape, privilege escalation, or unexpected file/network access from inside a kernel, report it at **critical** priority.
 
-## 报告处理流程
+## Handling Process
 
-1. 维护者确认报告并回复确认。
-2. 评估严重性与影响面，制定修复计划。
-3. 开发修复与回归测试，在私有分支验证。
-4. 发布修复与安全公告，披露受影响版本与升级建议。
+1. Maintainers acknowledge and reply to the report.
+2. Severity and impact are assessed; a fix plan is drafted.
+3. The fix and regression tests are developed and verified on a private branch.
+4. The fix and a security advisory are released, disclosing affected versions and upgrade guidance.
 
-感谢你帮助让 King.triton-kernel 对所有人都更安全。
+Thanks for helping make King.triton-kernel safer for everyone.

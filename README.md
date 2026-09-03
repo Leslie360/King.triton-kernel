@@ -1,113 +1,190 @@
 # King.triton-kernel
 
-> **让 LLM 写出"正确且更快"的 Triton kernel** — 14B 模型 · RLVR 后训练 · 单机 8×A800
-> 面向 **KernelBench L2** 的 Triton kernel 生成 RLVR 管线，参考同领域开源项目 [Dr.Kernel](https://github.com/alpha-beta-wang/Dr.-Kernel)（arXiv 2602.05885）架构组织（评估环境 + 训练方法），并在**评测口径诚实化**上做了差异化工程。
-
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](pyproject.toml)
+[![CI](https://github.com/Leslie360/King.triton-kernel/actions/workflows/ci.yml/badge.svg)](https://github.com/Leslie360/King.triton-kernel/actions/workflows/ci.yml)
 
-**King.triton-kernel** 是一个 **Triton kernel 生成的强化学习后训练（RLVR）管线**：
-模型被训练成**自主分析 kernel、写 Triton 实现、编译、执行验证、按速度反馈迭代修复**的 agent。
-单机 8×A800 即可训练，产出 14B 量级的 Triton kernel 生成模型。
+**English** | [简体中文](README.zh-CN.md)
 
----
+> **King.triton-kernel** is a reinforcement-learning training framework that teaches a 14B LLM to write, compile, and run faster Triton kernels on real GPUs — turning operator specs into verified speedups on KernelBench L2 — plus a standalone GPU evaluation environment for any execution-verified code-generation task.
 
-## 🏆 方法主张
-
-**奖励"执行正确"，编译只是硬门槛 — 编译率 ≠ 正确率。**
-
-这是本项目训练方法的核心主张，也是领域共识（Dr.Kernel / daVinci / DRTriton / CUDA Agent 等均以真实 GPU 执行验证为核心奖励信号）：
-
-- 编译失败 = 硬惩罚（-1.0 量级）
-- 正确性 = 0.4 权重，性能 speedup = 0.3，编译 = 0.3
-- 多轮修复（默认 5 轮），配合 **verifier 自适应终止**（速度达标即早停，防退化）
-- 判分走真实 GPU 执行：`正确 ∧ speedup ≥ 阈值`，失败轮（performance=0）不混入速度统计
-
-**reward 信号是"跑对了没"，不是"编译过了没"** — 刷编译率学不到正确性，这是本项目与"刷编译率"类方法的本质区别。
+An RLVR training pipeline for Triton kernel generation on KernelBench L2: it trains a 14B model into an agent that autonomously analyzes an operator, writes a Triton implementation, compiles and executes it on a real GPU, and iteratively repairs it based on correctness and speed feedback — plus a standalone, reusable GPU evaluation environment.
 
 ---
 
-## 📐 架构
+## Contents
+
+- [Introduction](#introduction)
+- [Background](#background)
+- [Method](#method)
+- [Results](#results)
+- [Installation & Quick Start](#installation--quick-start)
+- [Repository Layout & Layering](#repository-layout--layering)
+- [Related Work](#related-work)
+- [Documentation](#documentation)
+- [Release Status](#release-status)
+- [License](#license)
+
+## Introduction
+
+This project ships two independently usable deliverables:
+
+| Deliverable | Description | Use case |
+|---|---|---|
+| **kernelgym evaluation environment** | A self-contained distributed GPU grading service: subprocess-isolated execution, CUDA-event timing, correctness checking, reference timing cache | Any code-generation task that needs real-execution verification; reusable without the training stack |
+| **RLVR training method** | A multi-turn repair reinforcement-learning pipeline with execution correctness as the core reward signal (verl ecosystem; reward implementations in `drkernel/`) | RL post-training for kernel / code generation |
+
+Target audience:
+
+1. **AI Infra / RL researchers and engineers** who want to reproduce kernel-generation RL training, or reuse an execution-verified evaluation environment with caliber governance;
+2. **Evaluation practitioners** who care about comparable protocols and reproducibility discipline on KernelBench L2.
+
+**Hardware requirements**: training needs a single node with 8×A800 (or GPUs with comparable memory); using the kernelgym evaluation environment alone needs only 1 GPU.
+
+## Background
+
+Two engineering problems are unavoidable when generating GPU kernels with LLMs:
+
+**First, compiling is not the same as being correct.** A kernel that compiles may still produce wrong results or trigger illegal memory access. If the reward signal only reflects compilability, the model learns to write compile-friendly but functionally broken code. The reward must therefore come from **actual execution on a real GPU** — this is the core methodological claim of this project (shared with Dr.Kernel / daVinci / DRTriton / CUDA Agent).
+
+**Second, evaluation calibers distort easily.** The same set of model outputs can differ by double-digit percentage points depending on the aggregation protocol (sampling budget, turn range, speedup threshold, reference timing method). Numbers without caliber discipline are neither reproducible nor comparable to external work. This project treats caliber governance as a first-class engineering problem (see the protocol notes in [Results](#results)).
+
+## Method
+
+### Core claim
+
+> The reward signal is "did it run correctly", not "did it compile". Compile rate ≠ correctness rate.
+
+Concrete design:
+
+- **Compile failure: hard penalty** (−1.0 magnitude), rejected outright;
+- **Reward composition**: correctness 0.4 + speedup 0.3 + compilation 0.3;
+- **Grading rule**: a kernel must execute on a real GPU and match the reference output within tolerance before entering speed statistics — failed submissions never mix into speedup numbers ("wrong" and "slow" are strictly separated);
+- **Multi-turn repair (5 turns by default) + adaptive early stop**: the model iterates on grader feedback (compile error / correctness failure / insufficient speedup) and stops early once the speed target is met, preventing later-turn degradation.
+
+### Training pipeline
+
+```
+SKILL injection ──► repair-flywheel SFT ──► RLVR (TRLOO)
+    │                     │                     │
+    │              (correctness front)     (performance front)
+    │                     │                     │
+    └──► multi-turn self-repair + adaptive termination ◄─┘
+```
+
+- **SKILL injection**: common failure modes (dtype / mask / shape / numerical stability / boundary, 10 categories) are distilled into skill documents and injected into prompts per turn based on feedback;
+- **Repair-flywheel SFT**: failure-repair trajectories collected during RL are distilled back into supervised fine-tuning — the main lever for correctness;
+- **RLVR** (main algorithm TRLOO): reinforcement learning on verifiable rewards — the main lever for performance.
+
+### Caliber governance
+
+To keep reported numbers reproducible and comparable, the project enforces the following discipline (details in `docs/ARCHITECTURE.md` §5):
+
+1. **Reference timing cache**: the reference implementation is not re-timed during grading, removing run-level denominator jitter;
+2. **Single authoritative aggregator**: `evals/agg_eval.py` is the only authoritative aggregation script; all other scripts are for cross-validation only;
+3. **Failed turns excluded from speedup**: only turns with `correctness=True` participate in speedup statistics;
+4. **Four-piece provenance**: every public number carries script version (incl. SHA), sampling budget, extractor version, and caliber version. Mixing calibers is forbidden.
+
+## Results
+
+> Numbers locked as of 2026-09-02 under the v2 protocol (reference cache ON), reported as the mean of three independent evaluation runs.
+
+**Primary metric — fast@1.2**: fraction of problems where the best submission across all samples × all repair turns (per-problem best-of-history) is correct and achieves speedup ≥ 1.2×. Conditions: KernelBench L2 (100 problems), 8 samples × 5 repair turns, single A800 node, TF32 enabled.
+
+| Model | fast@1.2 (best-of-history) | Notes |
+|---|---|---|
+| **King.triton-kernel (14B, this project)** | **61.0% ± 6.2pp** (n=3) | headline number |
+| SFT v2 (distilled from the RL repair flywheel, ~10-min LoRA) | 65.0% ± 6.2pp (n=3) | statistically indistinguishable from the RL baseline at ~1% training cost; one run reached 72%, pending post-release re-verification |
+| Dr.Kernel-14B | 47.8% (best-turn, STTS†) | arXiv 2602.05885; sampling budget not disclosed |
+| daVinci-14B | 27.1% (L2 Fast@1.2, best-turn) | arXiv 2606.16497 |
+
+Protocol caveats:
+
+- fast@1 vs fast@1.2, best-of-history vs best-turn, and speedup ≥1.0× vs ≥1.2× are different calibers and must not be compared directly. daVinci reports both: 27.1% = L2 Fast@1.2, 70.6% = L2 Fast@1.
+- Measurement conditions (node 205, 8×A800): clocks at 1155/1410 MHz natural boost (frequency locking unavailable without root); reference timing carries a 12–20% cross-node spread (machine property) — all numbers above are internally consistent within node 205; correctness 82.3% is judged against the TF32 reference (TF32-ON caliber).
+- Single-run noise is ±3–6pp; conclusions require the mean of ≥3 runs.
+
+## Installation & Quick Start
+
+**Requirements**: Python ≥ 3.10, Linux + NVIDIA GPU (driver-visible is enough; CUDA ships with torch/triton), Redis.
+
+```bash
+# 1. Clone and install dependencies
+git clone https://github.com/Leslie360/King.triton-kernel.git
+cd King.triton-kernel
+bash setup.sh          # equivalent to: pip install -r requirements.txt
+
+# 2. Editable install (provides kernelgym-server and other CLI entry points)
+pip install -e .
+
+# 3. Start the evaluation server (default port 10907, override with API_PORT)
+kernelgym-server
+
+# 4. Smoke test (checks server health)
+python3 smoke_test.py http://localhost:10907
+```
+
+CLI entry points (from `pyproject.toml [project.scripts]`):
+
+| Command | Purpose |
+|---|---|
+| `kernelgym-server` | Grading API server |
+| `kernelgym-worker` | GPU execution worker |
+| `kernelgym-worker-monitor` | Worker monitor |
+| `kernelgym-single-worker` | Single-worker mode (debugging) |
+
+> The training stack (verl integration in `drkernel/`) depends on upstream [verl](https://github.com/verl-project/verl) and is not shipped with this repository — install and align the version yourself. The `kernelgym/` evaluation environment has no such dependency.
+
+## Repository Layout & Layering
 
 ```
 King.triton-kernel/
-├── kernelgym/   # GPU 分布式评估环境（独立副本，自包含，零 verl/ray/vllm 依赖）
-│                 #   subprocess worker 池 / CUDA 事件计时 / correctness 校验 / 多后端
-├── drkernel/    # RL 训练方法（独立副本：reward 实现 + 提示词工具）
-│                 #   VERL 集成 / 多维度 reward / 训练配置
-├── evals/       # 评测口径与聚合（agg_eval.py / compare_gs_eval.py / repro_pass_at_k.py）
-├── docs/        # 核心洞见 + 评测口径文档 + 发布清扫清单
-├── requirements.txt
-├── setup.sh
+├── kernelgym/   # Distributed GPU evaluation environment (core lib + server + worker)
+├── drkernel/    # RL reward implementations and prompt tooling (verl integration, upstream dependency)
+├── evals/       # Aggregation and calibers (agg_eval.py / compare_gs_eval.py / repro_pass_at_k.py)
+├── docs/        # ARCHITECTURE.md (architecture & calibers) / ROADMAP.md
+├── tests/       # 166 test functions (CI runs the CPU-only logic subset)
+├── setup.sh      # Dependency installation
 └── smoke_test.py
 ```
 
-### kernelgym/ — 独立评估环境（可直接复用）
+Layering (details in `docs/ARCHITECTURE.md` §6):
 
-- **自包含**：仅依赖 torch/triton/redis/fastapi/httpx，无 verl/ray/vllm 耦合，可独立启动判分 server。
-- **subprocess 隔离**：kernel 执行在子进程池中进行，CUDA 错误/非法内存访问被隔离，worker 不死。
-- **真实执行验证**：CUDA 事件计时 + correctness 校验（rtol/atol 容差）+ 多后端支持。
-- **reference 分母固定**（`InMemoryReferenceCache`，key=uuid+ref_hash+is_valid）：判分不重跑 reference 分母，消除 run 级分母抖动——**口径诚实的工程基础**。
+| Layer | Location | Dependencies | Shipped |
+|---|---|---|---|
+| Core evaluation library | `kernelgym/core\|schema\|workflow\|backend\|toolkit\|worker/` | torch / triton / numpy | Yes |
+| Grading server | `kernelgym/server\|config\|utils/` | fastapi / redis | Yes |
+| Training side | `drkernel/` | verl / ray / vllm | Partially (verl not shipped) |
+| Evaluation aggregation | `evals/` | pandas / pyarrow | Yes |
 
----
+Layering rules: `kernelgym/` stays free of verl/ray/vllm dependencies so the evaluation environment is always independently reusable; the training side embeds no grading logic of its own and only consumes server-returned verdicts.
 
-## 管线总览
+## Related Work
 
-```
-SKILL 注入 ──► 修复飞轮 SFT ──► RLVR (TRLOO)
-    │              │                │
-    │         (正确性主战场)    (性能轴主攻)
-    │              │                │
-    └──► 多轮自我修复 + 自适应终止 ◄─┘
-```
+| Work | Relationship |
+|---|---|
+| [Dr.Kernel](https://github.com/alpha-beta-wang/Dr.-Kernel) (arXiv 2602.05885) | This project follows its "evaluation environment + training method" architecture, with differentiated engineering on evaluation-caliber governance |
+| daVinci (arXiv 2606.16497) | KernelBench L2 comparison baseline |
+| DRTriton / CUDA Agent | Domain works that likewise use real GPU execution as the core reward signal |
+| [verl](https://github.com/verl-project/verl) | Upstream training framework |
 
-## 方法要点
+## Documentation
 
-1. **执行验证为硬门槛**：只有 CUDA 执行通过且输出正确的 kernel 才进入速度统计
-2. **speedup 分母固定**（reference 计时缓存）：消除 run 级分母抖动，口径诚实
-3. **多轮修复循环**：模型收到 server 反馈（compile/correctness/speedup/error）→ 迭代改进
-4. **权威口径 = per-problem best-of-history**：每题任一样本任一轮最优，跨全部轮次
-5. **口径审计纪律**：对外数字必须附口径（TP/样本数/轮次/refcache 状态/脚本 SHA），禁止口径混用
+| Document | Content |
+|---|---|
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Architecture, data flow, caliber definitions, layering |
+| [docs/ROADMAP.md](docs/ROADMAP.md) | Current / near-term / mid-term / long-term plans |
+| [CHANGELOG.md](CHANGELOG.md) | Release history |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Contributing guide (incl. evaluation-caliber discipline) |
 
----
+## Release Status
 
-## 📊 评测
-
-> **已锁定（2026-09-02, 静默窗 v2 口径）** — 结果表由 v2 口径（reference_cache=ON）重测回填，权威数字已锁定。
-
-- **主指标**：best-of-history（per-problem 最优提交，权威实现 `evals/agg_eval.py`）
-- **4 数报告**：sample_solve_rate / correctness / fast@1 / fast@1.2（标注 best-of 预算）
-- **对比基线**：Dr.Kernel（arXiv 2602.05885）、daVinci（KernelBench L2）
-
-| 模型 | KernelBench L2 fast@1.2 (best-of) | 备注 |
-|---|---|---|
-| **King.triton-kernel (14B)** | **61.0% ± 6.2pp** (n=3, 100 题, 8 采样×5 轮 best-of-history, A800, TF32-ON) | headline |
-| SFT v2（distilled from RL flywheel, ~10min LoRA） | 65.0% ± 6.2pp (n=3) | 与 RL 基线统计上不可区分 @ ~1% 训练成本 |
-| Dr.Kernel-14B | 47.8%（best-turn, STTS†） | arXiv 2602.05885 · 预算口径未披露 |
-| daVinci-14B | 27.1%（L2 **Fast@1.2**, best-turn） | arXiv 2606.16497 |
-
-> ⚠️ **口径不可混用**：fast@1 vs fast@1.2、best-of vs best-turn、≥1.0x vs ≥1.2x 必须各标定义。daVinci 双口径分开报：27.1% = L2 Fast@1.2，70.6% = L2 Fast@1，不得混用。
-
-**SFT v2 表述**：SFT v2 (distilled from the RL flywheel, ~10min LoRA): 65.0% ± 6.2pp (n=3) — statistically indistinguishable from the RL baseline at ~1% training cost; one run (72%) flagged as potential upside, post-release re-verification pending.
-
-> 📏 **测量条件**（205, 8×A800）：时钟 1155/1410MHz 自然 boost（无 CAP_SYS_ADMIN 不可锁频）；reference 分母 12-20% 机差为机器属性（与 dev1 相比），本报告全部数字在 205 单机内自洽；correctness 82.3% 对 TF32 reference 判定（TF32-ON 口径）。
-
----
-
-## 安装与冒烟
-
-```bash
-bash setup.sh
-python3 smoke_test.py http://<eval-server>:8004
-```
-
----
-
-## 开源状态
-
-✅ **独立副本已就位（2026-08-30）** — `kernelgym/` 评估引擎、`drkernel/` reward 实现、`evals/` 口径工具均为真实代码副本（非软链、非共享盘），排除：私有数据集、训练 checkpoint、内部日志、verl_patch 内部 overlay。
-
-> ⚠️ 训练栈（`main_grading.py` / verl 集成）依赖 [verl](https://github.com/verl-project/verl) 上游，未随仓库发布，需自行安装对齐版本。
+v0.1.0 (2026-08-31) is the first public release: `kernelgym/`, `drkernel/`, and `evals/` are real code copies, with private datasets, training checkpoints, internal logs, and internal paths excluded. Some files originating from the verl / Dr.Kernel ecosystem retain their Apache-2.0 headers — see [NOTICE](NOTICE).
 
 ## License
 
-[MIT](LICENSE)
+[MIT](LICENSE). Attribution for Apache-2.0-licensed files in [NOTICE](NOTICE).
+
+## Contributing
+
+Issues and PRs are welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md) first — the evaluation-caliber discipline applies to external contributions as well.
