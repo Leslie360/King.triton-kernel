@@ -149,7 +149,7 @@ def print_run_line(run: str, stats: Tuple[int, int, float, float, float]) -> Non
         print(f"  {run}: no data")
         return
     print(
-        f"  {run}: problems={num_problems} samples={num_samples} "
+        f"  {run}: problems={num_problems} sample={num_samples} "
         f"sample_solve={sample_solve:.1f}% pass1_best={pass1_best:.0f}% "
         f"fast@1.2best-of={fast12_boh:.0f}%"
     )
