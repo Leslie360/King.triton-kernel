@@ -19,6 +19,14 @@ class Settings(BaseSettings):
     api_workers: int = Field(default=4, env="API_WORKERS")
     api_reload: bool = Field(default=False, env="API_RELOAD")
 
+    # CORS allowed origins (raw value). Default "*" permits any origin (matches
+    # the earlier hardcoded value). Override via CORS_ORIGINS to restrict, either
+    # as a JSON list or a comma-separated string, e.g.
+    #   CORS_ORIGINS='["https://app.example.com","https://dev.example.com"]'
+    # The parsed list is available via the `cors_origins_list` property.
+    cors_origins: str = Field(default="*", env="CORS_ORIGINS")
+
+
     gpu_devices: List[int] = Field(default_factory=lambda: list(range(8)), env="GPU_DEVICES")
     gpu_memory_limit: str = Field(default="16GB", env="GPU_MEMORY_LIMIT")
     node_id: str = Field(default="", env="NODE_ID")
@@ -199,6 +207,33 @@ class Settings(BaseSettings):
     @property
     def redis_url(self) -> str:
         return self.get_redis_url()
+
+    @property
+    def cors_origins_list(self) -> List[str]:
+        """Parse the `cors_origins` string into a list of origin strings.
+
+        Accepts either a JSON array (`["https://a.com","https://b.com"]`) or a
+        comma-separated string (`https://a.com,https://b.com`). A blank value or
+        the literal "*" maps to the wildcard single-element list.
+        """
+        raw = self.cors_origins
+        if not raw:
+            return ["*"]
+        stripped = raw.strip()
+        if not stripped:
+            return ["*"]
+        if stripped.startswith("["):
+            try:
+                import json
+
+                parsed = json.loads(stripped)
+                if isinstance(parsed, list):
+                    return [str(x) for x in parsed]
+                return [str(parsed)]
+            except Exception:
+                # Fall through to comma parsing below on malformed JSON.
+                pass
+        return [x.strip() for x in stripped.split(",") if x.strip()]
 
     def get_celery_config(self) -> Dict[str, Any]:
         return {
