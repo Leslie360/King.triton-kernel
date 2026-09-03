@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from typing import Any, Dict, Optional, Union
 
@@ -24,6 +25,8 @@ from kernelgym.toolkit.kernelbench.timing import (
     time_execution_with_cuda_event,
 )
 
+logger = logging.getLogger("kernelgym.pipeline")
+
 
 def _run_correctness_step(
     original_model,
@@ -36,7 +39,7 @@ def _run_correctness_step(
     device: Union[torch.device, int],
 ) -> KernelExecResult:
     if verbose:
-        print("[Eval] Checking Correctness")
+        logger.info("[Eval] Checking Correctness")
     try:
         return run_and_check_correctness(
             original_model,
@@ -70,7 +73,7 @@ def _run_triton_detection_step(
     if not enable_triton_detection:
         return False
     try:
-        print("Begin Triton usage detection")
+        logger.info("Begin Triton usage detection")
         if kernel_exec_result and kernel_exec_result.correctness:
             torch.cuda.synchronize(device=device)
             set_seed(seed_num)
@@ -92,22 +95,18 @@ def _run_triton_detection_step(
             )
             metadata["triton_profiler_used"] = used
             metadata["triton_profiler_matches"] = matches
-            print(f"Triton usage detection result: {used}")
-            print(f"Triton usage detection matches: {matches}")
+            logger.info("Triton usage detection result: %s", used)
+            logger.info("Triton usage detection matches: %s", matches)
             if not used and is_triton:
-                print(
+                logger.warning(
                     "[Eval] Backend is 'triton' but no Triton usage detected, marking as decoy"
                 )
                 kernel_exec_result.decoy_kernel = True
                 kernel_exec_result.runtime = -1.0
                 return True
-                if not used:
-                    print(
-                        f"[Eval] No Triton usage detected, but backend is '{backend}', continuing to performance measurement"
-                    )
     except Exception as e:
         if verbose:
-            print(f"[Eval] Error in Triton usage detection: {e}")
+            logger.error("[Eval] Error in Triton usage detection: %s", e)
         metadata["error_in_triton_detection"] = e
     return False
 
@@ -136,7 +135,7 @@ def _run_performance_step(
     try:
         if kernel_exec_result and kernel_exec_result.correctness:
             if verbose:
-                print("[Eval] Measuring Performance as Sample is Correct")
+                logger.info("[Eval] Measuring Performance as Sample is Correct")
 
             torch.cuda.synchronize(device=device)
             set_seed(seed_num)
@@ -161,8 +160,10 @@ def _run_performance_step(
             if enable_profiling and _profiling_empty(profiling_metrics):
                 retry_count = max(0, int(getattr(settings, "profiling_retry_count", 0)))
                 for attempt in range(retry_count):
-                    print(
-                        f"[WARNING] Profiler returned empty results. Retrying ({attempt + 1}/{retry_count})..."
+                    logger.warning(
+                        "[WARNING] Profiler returned empty results. Retrying (%s/%s)...",
+                        attempt + 1,
+                        retry_count,
                     )
                     retry_metrics = run_profiling_only(
                         model_new,
@@ -177,27 +178,32 @@ def _run_performance_step(
                     profiling_metrics = retry_metrics
 
             if enable_profiling:
-                print(
-                    f"[DEBUG] profiling_metrics type: {type(profiling_metrics)}, empty: {not profiling_metrics}"
+                logger.debug(
+                    "[DEBUG] profiling_metrics type: %s, empty: %s",
+                    type(profiling_metrics),
+                    not profiling_metrics,
                 )
                 if profiling_metrics.get("profiling_warning"):
-                    print(
-                        f"[WARNING] Profiling warning: {profiling_metrics['profiling_warning']}"
+                    logger.warning(
+                        "[WARNING] Profiling warning: %s",
+                        profiling_metrics["profiling_warning"],
                     )
 
                 if _profiling_empty(profiling_metrics):
-                    print("[WARNING] Profiler returned empty results!")
-                    print(
+                    logger.warning("[WARNING] Profiler returned empty results!")
+                    logger.warning(
                         "[WARNING] This may be a profiler bug, not a decoy kernel issue."
                     )
-                    print(
-                        f"[WARNING] Triton hook detected: {metadata.get('triton_profiler_used', False)}"
+                    logger.warning(
+                        "[WARNING] Triton hook detected: %s",
+                        metadata.get("triton_profiler_used", False),
                     )
-                    print(
-                        f"[WARNING] Triton matches: {len(metadata.get('triton_profiler_matches', []))}"
+                    logger.warning(
+                        "[WARNING] Triton matches: %s",
+                        len(metadata.get("triton_profiler_matches", [])),
                     )
                     if metadata.get("triton_profiler_used", False):
-                        print(
+                        logger.info(
                             "[INFO] Skipping decoy detection due to profiler failure (Triton hook passed)"
                         )
 
@@ -206,14 +212,17 @@ def _run_performance_step(
                 if kernel_exec_result and isinstance(kernel_exec_result.metadata, dict):
                     kernel_exec_result.metadata["profiling"] = profiling_metrics
 
-                print(
-                    f"[DEBUG Profiling] profiling_metrics keys: {profiling_metrics.keys()}"
+                logger.debug(
+                    "[DEBUG Profiling] profiling_metrics keys: %s",
+                    profiling_metrics.keys(),
                 )
-                print(
-                    f"[DEBUG Profiling] kernel_count: {profiling_metrics.get('kernel_count', 'N/A')}"
+                logger.debug(
+                    "[DEBUG Profiling] kernel_count: %s",
+                    profiling_metrics.get("kernel_count", "N/A"),
                 )
-                print(
-                    f"[DEBUG Profiling] triton_profiler_matches: {metadata.get('triton_profiler_matches', [])}"
+                logger.debug(
+                    "[DEBUG Profiling] triton_profiler_matches: %s",
+                    metadata.get("triton_profiler_matches", []),
                 )
 
                 try:
@@ -221,8 +230,9 @@ def _run_performance_step(
                         metadata["triton_profiler_matches"], profiling_metrics
                     )
                 except Exception as coverage_error:
-                    print(
-                        f"[ERROR] compute_triton_kernel_coverage failed: {coverage_error}"
+                    logger.error(
+                        "[ERROR] compute_triton_kernel_coverage failed: %s",
+                        coverage_error,
                     )
                     import traceback
 
@@ -237,11 +247,13 @@ def _run_performance_step(
                         "total_kernel_run_time_in_profiling_us": 0,
                         "custom_kernel_cuda_time_in_profiling_us": 0,
                     }
-                print(
-                    f"[DEBUG Coverage] num_custom_kernels: {coverage_result_dict['num_custom_kernels']}"
+                logger.debug(
+                    "[DEBUG Coverage] num_custom_kernels: %s",
+                    coverage_result_dict["num_custom_kernels"],
                 )
-                print(
-                    f"[DEBUG Coverage] num_total_kernels: {coverage_result_dict['num_total_kernels']}"
+                logger.debug(
+                    "[DEBUG Coverage] num_total_kernels: %s",
+                    coverage_result_dict["num_total_kernels"],
                 )
                 num_custom_kernels = coverage_result_dict["num_custom_kernels"]
                 num_total_kernels = coverage_result_dict["num_total_kernels"]
@@ -310,24 +322,26 @@ def _run_performance_step(
                     )
 
                 if num_custom_kernels == 0 and num_total_kernels > 0:
-                    print(
-                        f"[WARNING] Profiler captured {num_total_kernels} kernels but 0 custom kernels - marking as decoy"
+                    logger.warning(
+                        "[WARNING] Profiler captured %s kernels but 0 custom kernels - marking as decoy",
+                        num_total_kernels,
                     )
                     kernel_exec_result.decoy_kernel = True
                 elif num_custom_kernels == 0 and num_total_kernels == 0:
-                    print(
+                    logger.warning(
                         "[WARNING] Profiler captured 0 total kernels - likely profiler bug, NOT marking as decoy"
                     )
-                    print(
-                        f"[INFO] Relying on Triton hook detection instead (detected: {metadata.get('triton_profiler_used', False)})"
+                    logger.info(
+                        "[INFO] Relying on Triton hook detection instead (detected: %s)",
+                        metadata.get("triton_profiler_used", False),
                     )
             if verbose:
-                print(f"[Eval] Performance Stats: {runtime_stats}")
+                logger.info("[Eval] Performance Stats: %s", runtime_stats)
             kernel_exec_result.runtime = runtime_stats["mean"]
             kernel_exec_result.runtime_stats = runtime_stats
     except Exception as e:
         if verbose:
-            print(f"[Eval] Error in Measuring Performance: {e}")
+            logger.error("[Eval] Error in Measuring Performance: %s", e)
         kernel_exec_result.metadata["error_during_performance"] = e
 
 def eval_kernel_against_ref(
@@ -374,8 +388,8 @@ def eval_kernel_against_ref(
     context = {}
 
     if verbose:
-        print(f"[Eval] Start Evalulation! on device: {device}")
-        print("[Eval] Loading Original Model")
+        logger.info("[Eval] Start Evalulation! on device: %s", device)
+        logger.info("[Eval] Loading Original Model")
 
     Model, get_init_inputs, get_inputs = load_original_model_and_inputs(
         original_model_src, context, entry_point
@@ -386,7 +400,7 @@ def eval_kernel_against_ref(
         x.cuda(device=device) if isinstance(x, torch.Tensor) else x for x in init_inputs
     ]
 
-    print(f"[DEBUG] init inputs: {init_inputs}")
+    logger.debug("[DEBUG] init inputs: %s", init_inputs)
 
     if (
         len(init_inputs) > 1
@@ -406,9 +420,9 @@ def eval_kernel_against_ref(
 
         assert hasattr(original_model, "forward")
         if verbose:
-            print("[Eval] Original Model Loaded")
+            logger.info("[Eval] Original Model Loaded")
     if verbose:
-        print("[Eval] Loading and Compiling New Model with Custom CUDA Kernel")
+        logger.info("[Eval] Loading and Compiling New Model with Custom CUDA Kernel")
 
     tempfile_handle = None
     backend_handle = None
@@ -436,8 +450,9 @@ def eval_kernel_against_ref(
             if not artifact.get("compiled"):
                 error = artifact.get("error", "Unknown compile error")
                 if "lock" in str(error) or "No such file or directory" in str(error):
-                    print(
-                        f"[Eval] Lock file error during compilation, Please retry. Error: {error}"
+                    logger.error(
+                        "[Eval] Lock file error during compilation, Please retry. Error: %s",
+                        error,
                     )
                     _cleanup()
                     return None
@@ -460,18 +475,20 @@ def eval_kernel_against_ref(
                     custom_model_src, entry_point=f"{entry_point}New"
                 )
                 if verbose:
-                    print("[Eval] Model with Triton Loaded")
+                    logger.info("[Eval] Model with Triton Loaded")
             else:
                 ModelNew = load_custom_model(custom_model_src, context, build_dir)
         torch.cuda.synchronize(device=device)
     except Exception as e:
-        print(
-            f"Failed to compile custom CUDA kernel: Record as compilation failure. \nError: {e}"
+        logger.error(
+            "Failed to compile custom CUDA kernel: Record as compilation failure. \nError: %s",
+            e,
         )
 
         if "lock" in str(e) or "No such file or directory" in str(e):
-            print(
-                f"[Eval] Lock file error during compilation, Please retry. Error: {e}"
+            logger.error(
+                "[Eval] Lock file error during compilation, Please retry. Error: %s",
+                e,
             )
             _cleanup()
             return None
@@ -499,11 +516,12 @@ def eval_kernel_against_ref(
             assert hasattr(custom_model, "forward")
             torch.cuda.synchronize(device=device)
         if verbose:
-            print("[Eval] New Model with Custom CUDA Kernel Loaded")
+            logger.info("[Eval] New Model with Custom CUDA Kernel Loaded")
     except RuntimeError as e:
-        print(
+        logger.error(
             "Failed to load custom CUDA kernel; Compiled but not able to run, count as runtime error. \n"
-            f"Error: {e}"
+            "Error: %s",
+            e,
         )
         _cleanup()
         metadata["runtime_error"] = e
@@ -592,8 +610,8 @@ def eval_reference_only(
     context: Dict[str, Any] = {}
 
     if verbose:
-        print(f"[Eval] Start Evaluation! on device: {device}")
-        print("[Eval] Loading Original Model")
+        logger.info("[Eval] Start Evaluation! on device: %s", device)
+        logger.info("[Eval] Loading Original Model")
 
     try:
         Model, get_init_inputs, get_inputs = load_original_model_and_inputs(
@@ -614,10 +632,10 @@ def eval_reference_only(
                 original_model = Model(**init_inputs)
             assert hasattr(original_model, "forward")
         if verbose:
-            print("[Eval] Original Model Loaded")
+            logger.info("[Eval] Original Model Loaded")
 
     except Exception as e:
-        print(f"Failed to load original model: {e}")
+        logger.error("Failed to load original model: %s", e)
         metadata["model_load_error"] = e
         metadata["model_load_error_name"] = get_error_name(e)
         return KernelExecResult(compiled=False, correctness=False, metadata=metadata)
@@ -626,7 +644,7 @@ def eval_reference_only(
 
     try:
         if verbose:
-            print("[Eval] Measuring Performance of Original Model")
+            logger.info("[Eval] Measuring Performance of Original Model")
 
         torch.cuda.synchronize(device=device)
         set_seed(seed_num)
@@ -639,17 +657,17 @@ def eval_reference_only(
         if reference_backend:
             backend_name = reference_backend.lower()
             metadata["reference_backend"] = backend_name
-            print(f"[Eval] reference_backend={backend_name}")
+            logger.info("[Eval] reference_backend=%s", backend_name)
             if backend_name in ("torch_compile", "torch-compile", "compile"):
                 try:
                     if not hasattr(torch, "compile"):
                         raise RuntimeError("torch.compile is not available")
                     model = torch.compile(model)
                     metadata["reference_backend_compiled"] = True
-                    print("[Eval] torch.compile succeeded")
+                    logger.info("[Eval] torch.compile succeeded")
                 except Exception as e:
                     metadata["reference_backend_error"] = str(e)
-                    print(f"[Eval] torch.compile failed: {e}")
+                    logger.error("[Eval] torch.compile failed: %s", e)
                     return KernelExecResult(compiled=False, correctness=False, metadata=metadata)
         torch.cuda.synchronize(device=device)
 
@@ -664,12 +682,12 @@ def eval_reference_only(
         runtime_stats = get_timing_stats(elapsed_times, device=device)
 
         if verbose:
-            print(f"[Eval] Performance Stats: {runtime_stats}")
+            logger.info("[Eval] Performance Stats: %s", runtime_stats)
         kernel_exec_result.runtime = runtime_stats["mean"]
         kernel_exec_result.runtime_stats = runtime_stats
     except Exception as e:
         if verbose:
-            print(f"[Eval] Error in Measuring Performance: {e}")
+            logger.error("[Eval] Error in Measuring Performance: %s", e)
         kernel_exec_result.metadata["error_during_performance"] = e
 
     graceful_eval_cleanup(context, device, None)
