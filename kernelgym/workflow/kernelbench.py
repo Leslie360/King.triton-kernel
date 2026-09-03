@@ -6,7 +6,10 @@ from typing import Any, Dict, Optional
 from pathlib import Path
 import json
 import time
+import logging
 from datetime import datetime, timezone
+
+logger = logging.getLogger(__name__)
 
 from kernelgym.common import ErrorCode
 from kernelgym.config import settings
@@ -45,8 +48,10 @@ class KernelBenchWorkflowController(WorkflowController):
         state = WorkflowState({"base_task_id": eval_task.task_id})
 
         if eval_task.reference_backend:
-            print(
-                f"[Workflow] task={eval_task.task_id} reference_backend={eval_task.reference_backend}"
+            logger.info(
+                "[Workflow] task=%s reference_backend=%s",
+                eval_task.task_id,
+                eval_task.reference_backend,
             )
 
         validation = self._validate_inputs(eval_task)
@@ -93,13 +98,17 @@ class KernelBenchWorkflowController(WorkflowController):
         _t_k0 = time.time()
         kernel_task_id = await scheduler.submit(kernel_task_spec)
         kernel_result_dict = await scheduler.wait(kernel_task_id)
-        print(
-            f"PHASE_TIMING task={eval_task.task_id} phase=kernel "
-            f"elapsed={time.time() - _t_k0:.3f} "
-            f"perf_trials={eval_task.num_perf_trials} "
-            f"correct_trials={eval_task.num_correct_trials} "
-            f"compiled={bool(kernel_result_dict.get('compiled')) if kernel_result_dict else False}",
-            flush=True,
+        logger.info(
+            "PHASE_TIMING task=%s phase=kernel "
+            "elapsed=%.3f "
+            "perf_trials=%s "
+            "correct_trials=%s "
+            "compiled=%s",
+            eval_task.task_id,
+            time.time() - _t_k0,
+            eval_task.num_perf_trials,
+            eval_task.num_correct_trials,
+            bool(kernel_result_dict.get('compiled')) if kernel_result_dict else False,
         )
 
         if not kernel_result_dict:
@@ -176,11 +185,13 @@ class KernelBenchWorkflowController(WorkflowController):
             _t_r0 = time.time()
             ref_task_id = await scheduler.submit(ref_task_spec)
             ref_result_dict = await scheduler.wait(ref_task_id)
-            print(
-                f"PHASE_TIMING task={eval_task.task_id} phase=reference "
-                f"elapsed={time.time() - _t_r0:.3f} "
-                f"perf_trials={eval_task.num_perf_trials}",
-                flush=True,
+            logger.info(
+                "PHASE_TIMING task=%s phase=reference "
+                "elapsed=%.3f "
+                "perf_trials=%s",
+                eval_task.task_id,
+                time.time() - _t_r0,
+                eval_task.num_perf_trials,
             )
             if ref_result_dict:
                 if "error_message" in ref_result_dict and "reference_runtime" not in ref_result_dict:

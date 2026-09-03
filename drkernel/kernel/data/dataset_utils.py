@@ -18,8 +18,11 @@ Kernel 数据处理工具
 """
 
 import json
+import logging
 import re
 from typing import Dict, List, Any, Optional
+
+logger = logging.getLogger(__name__)
 
 
 def process_kernel_data(data_item: Dict[str, Any]) -> Dict[str, Any]:
@@ -194,7 +197,7 @@ def load_kernel_dataset(dataset_path: str) -> List[Dict[str, Any]]:
                     dataset.append(processed_item)
     
     except Exception as e:
-        print(f"Error loading dataset from {dataset_path}: {e}")
+        logger.error("Error loading dataset from %s: %s", dataset_path, e)
         return []
     
     return dataset

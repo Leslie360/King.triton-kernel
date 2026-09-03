@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 from typing import Any, Optional, Tuple
+
+logger = logging.getLogger(__name__)
 
 from .kernelbench_types import (
     EvaluationTask,
@@ -69,7 +72,7 @@ def _put_reference_cache(uuid: Optional[str], reference_code: str, is_valid: boo
     try:
         _reference_cache.put(uuid, reference_code, is_valid, runtime)
     except Exception as e:
-        print(f"[refcache] put error: {e}")
+        logger.error("[refcache] put error: %s", e)
 
 
 def _validate_code(code: str, entry_point: str = "Model") -> Tuple[bool, str]:
