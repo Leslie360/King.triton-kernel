@@ -692,10 +692,9 @@ def _persistent_worker_loop(
         })
 
         # 日志
-        print(
-            f"[{worker_id}] Initialized successfully "
-            f"(device={device}, init_time={init_time:.2f}s)",
-            file=sys.stderr
+        logger.info(
+            "[%s] Initialized successfully (device=%s, init_time=%.2fs)",
+            worker_id, device, init_time
         )
 
         # ====================================================================
@@ -711,7 +710,7 @@ def _persistent_worker_loop(
 
                 # 检查是否是 shutdown 命令
                 if isinstance(task_data, dict) and task_data.get("command") == "SHUTDOWN":
-                    print(f"[{worker_id}] Received SHUTDOWN command", file=sys.stderr)
+                    logger.info("[%s] Received SHUTDOWN command", worker_id)
                     break
 
                 # 执行任务
@@ -736,10 +735,7 @@ def _persistent_worker_loop(
                     # 强制清理显存
                     _aggressive_gpu_cleanup(device_id)
                 except Exception as cleanup_error:
-                    print(
-                        f"[{worker_id}] GPU cleanup warning: {cleanup_error}",
-                        file=sys.stderr
-                    )
+                    logger.warning("[%s] GPU cleanup warning: %s", worker_id, cleanup_error)
 
             except Exception as task_error:
                 # 任务执行失败
@@ -757,10 +753,10 @@ def _persistent_worker_loop(
 
                 if is_cuda_error or is_profiler_error:
                     # CUDA error / profiler dropout！准备退出
-                    print(
-                        f"[{worker_id}] CUDA/profiler error detected! Worker will exit. "
-                        f"Error: {error_type}: {error_message}",
-                        file=sys.stderr
+                    logger.error(
+                        "[%s] CUDA/profiler error detected! Worker will exit. "
+                        "Error: %s: %s",
+                        worker_id, error_type, error_message,
                     )
 
                     # 返回错误结果，并标记 worker 将退出
@@ -775,17 +771,20 @@ def _persistent_worker_loop(
                     })
 
                     # **关键：CUDA error 退出前强制清理显存**
-                    print(f"[{worker_id}] Performing aggressive GPU cleanup before exit...", file=sys.stderr)
+                    logger.warning("[%s] Performing aggressive GPU cleanup before exit...", worker_id)
                     try:
                         _aggressive_gpu_cleanup(device_id)
-                        print(f"[{worker_id}] GPU cleanup completed", file=sys.stderr)
+                        logger.info("[%s] GPU cleanup completed", worker_id)
                     except Exception as cleanup_err:
-                        print(f"[{worker_id}] GPU cleanup failed (expected after CUDA error): {cleanup_err}", file=sys.stderr)
+                        logger.error(
+                            "[%s] GPU cleanup failed (expected after CUDA error): %s",
+                            worker_id, cleanup_err,
+                        )
 
                     # 尝试最终同步（可能失败，但尝试一下）
                     try:
                         torch.cuda.synchronize()
-                        print(f"[{worker_id}] Final CUDA sync before exit", file=sys.stderr)
+                        logger.info("[%s] Final CUDA sync before exit", worker_id)
                     except:
                         pass
 
@@ -794,9 +793,9 @@ def _persistent_worker_loop(
 
                 else:
                     # 非 CUDA error，返回错误但继续运行
-                    print(
-                        f"[{worker_id}] Task error (non-CUDA): {error_type}: {error_message}",
-                        file=sys.stderr
+                    logger.warning(
+                        "[%s] Task error (non-CUDA): %s: %s",
+                        worker_id, error_type, error_message,
                     )
 
                     result_queue.put({
@@ -809,19 +808,18 @@ def _persistent_worker_loop(
                     })
 
         # 正常退出 - 清理显存
-        print(
-            f"[{worker_id}] Worker exiting normally "
-            f"(processed {tasks_processed} tasks)",
-            file=sys.stderr
+        logger.info(
+            "[%s] Worker exiting normally (processed %s tasks)",
+            worker_id, tasks_processed,
         )
 
         # **关键：正常退出时也要清理显存**
-        print(f"[{worker_id}] Performing final GPU cleanup...", file=sys.stderr)
+        logger.info("[%s] Performing final GPU cleanup...", worker_id)
         try:
             _aggressive_gpu_cleanup(device_id)
-            print(f"[{worker_id}] Final GPU cleanup completed", file=sys.stderr)
+            logger.info("[%s] Final GPU cleanup completed", worker_id)
         except Exception as cleanup_err:
-            print(f"[{worker_id}] Final GPU cleanup failed: {cleanup_err}", file=sys.stderr)
+            logger.error("[%s] Final GPU cleanup failed: %s", worker_id, cleanup_err)
 
         # **额外：尝试重置 CUDA 上下文（确保进程退出时完全释放）**
         try:
@@ -829,15 +827,15 @@ def _persistent_worker_loop(
             # 这会在进程退出时自动调用 CUDA cleanup
             # 但我们显式调用以确保
             torch.cuda.synchronize()
-            print(f"[{worker_id}] CUDA context synchronized before exit", file=sys.stderr)
+            logger.info("[%s] CUDA context synchronized before exit", worker_id)
         except Exception as cuda_cleanup_err:
-            print(f"[{worker_id}] CUDA synchronize failed: {cuda_cleanup_err}", file=sys.stderr)
+            logger.error("[%s] CUDA synchronize failed: %s", worker_id, cuda_cleanup_err)
 
     except Exception as init_error:
         # 初始化失败
-        print(
-            f"[{worker_id}] Initialization failed: {init_error}",
-            file=sys.stderr
+        logger.error(
+            "[%s] Initialization failed: %s",
+            worker_id, init_error,
         )
         traceback.print_exc(file=sys.stderr)
 
