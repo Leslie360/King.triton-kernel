@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import importlib.util
+import logging
 import os
 import tempfile
 from typing import Tuple
 
 import torch
 import torch.nn as nn
+
+logger = logging.getLogger(__name__)
 
 
 def load_original_model_and_inputs(
@@ -17,12 +20,12 @@ def load_original_model_and_inputs(
     try:
         compile(model_original_src, "<string>", "exec")
     except SyntaxError as e:
-        print(f"Syntax Error in original code {e}")
+        logger.error("Syntax Error in original code %s", e)
         return None
     try:
         exec(model_original_src, context)
     except Exception as e:
-        print(f"Error in executing original code {e}")
+        logger.error("Error in executing original code %s", e)
         return None
     get_init_inputs_fn = context.get("get_init_inputs")
     get_inputs_fn = context.get("get_inputs")
@@ -59,7 +62,7 @@ def load_custom_model(
         compile(model_custom_src, "<string>", "exec")
         exec(model_custom_src, context)
     except SyntaxError as e:
-        print(f"Syntax Error in custom generated code or Compilation Error {e}")
+        logger.error("Syntax Error in custom generated code or Compilation Error %s", e)
         return None
 
     ModelNew = context.get("ModelNew")

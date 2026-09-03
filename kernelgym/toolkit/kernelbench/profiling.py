@@ -78,10 +78,12 @@ def profiling_context(enabled: bool = True):
         if "cuda" in settings.profiling_activities:
             activities.append(profiler.ProfilerActivity.CUDA)
 
-        print(f"[Profiler] Initializing with activities: {[str(a) for a in activities]}")
+        logger.info(
+            "[Profiler] Initializing with activities: %s", [str(a) for a in activities]
+        )
 
         if not activities:
-            print("[Profiler] No activities configured, profiler will return no data")
+            logger.info("[Profiler] No activities configured, profiler will return no data")
             yield None
             return
 
@@ -95,7 +97,7 @@ def profiling_context(enabled: bool = True):
 
         prof.__enter__()
         try:
-            print("[Profiler] Profiler started successfully")
+            logger.info("[Profiler] Profiler started successfully")
             cuda_available = torch.cuda.is_available()
             cuda_visible = os.environ.get("CUDA_VISIBLE_DEVICES", "")
             device_info = "cuda:unavailable"
@@ -106,7 +108,7 @@ def profiling_context(enabled: bool = True):
                     device_info = f"cuda:{current_device} ({device_name})"
                 except Exception as e:
                     device_info = f"cuda:unknown (error={e})"
-            print(
+            logger.info(
                 "[Profiler] Context pid=%s cuda_available=%s device=%s CUDA_VISIBLE_DEVICES=%s",
                 os.getpid(),
                 cuda_available,
@@ -118,16 +120,16 @@ def profiling_context(enabled: bool = True):
                     test = torch.ones((1024,), device="cuda")
                     _ = test.sum()
                     torch.cuda.synchronize()
-                    print("[Profiler] Self-test CUDA op executed")
+                    logger.info("[Profiler] Self-test CUDA op executed")
                 except Exception as e:
-                    print(f"[Profiler] Self-test failed: {e}")
+                    logger.error("[Profiler] Self-test failed: %s", e)
             yield prof
         finally:
             try:
                 prof.__exit__(None, None, None)
-                print("[Profiler] Profiler stopped successfully")
+                logger.info("[Profiler] Profiler stopped successfully")
             except Exception as e:
-                print(f"[Profiler] Error during profiler cleanup: {e}")
+                logger.error("[Profiler] Error during profiler cleanup: %s", e)
 
     except Exception as e:
         logger.warning(f"[Profiler] Failed to initialize profiler: {e}. Continuing without profiling.")
@@ -142,7 +144,7 @@ def extract_profiling_metrics(prof: Optional["torch.profiler.profile"]) -> Dict[
         import torch.profiler as profiler
 
         events = prof.key_averages()
-        print(f"[Profiler] key_averages: {events}")
+        logger.debug("[Profiler] key_averages: %s", events)
         total_events = len(events)
         cuda_device_event_count = 0
         cuda_time_event_count = 0

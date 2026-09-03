@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Dict
 
 import torch
@@ -21,6 +22,8 @@ from kernelgym.toolkit.kernelbench.exec_types import set_seed
 from kernelgym.toolkit.kernelbench import pipeline as kernelbench_pipeline
 
 from ..base import Toolkit
+
+logger = logging.getLogger(__name__)
 
 
 class KernelBenchToolkit(Toolkit):
@@ -199,8 +202,10 @@ class KernelBenchToolkit(Toolkit):
             set_seed(42)
 
             if task.reference_backend:
-                print(
-                    f"[RefTiming] task={task.task_id} reference_backend={task.reference_backend}"
+                logger.info(
+                    "[RefTiming] task=%s reference_backend=%s",
+                    task.task_id,
+                    task.reference_backend,
                 )
 
             # 2026-08-29 P0 深修(K3 §20 Q2): reference 计时 median-of-3
@@ -339,8 +344,9 @@ class KernelBenchToolkit(Toolkit):
             if enable_profiling and "profiling" in result.metadata:
                 profiling_metrics = result.metadata["profiling"]
                 if profiling_metrics:
-                    print(
-                        f"[DEBUG] Profiling captured {profiling_metrics.get('kernel_count', 0)} kernels"
+                    logger.debug(
+                        "[DEBUG] Profiling captured %s kernels",
+                        profiling_metrics.get("kernel_count", 0),
                     )
 
             return KernelEvaluationResult.from_kernel_exec_result(

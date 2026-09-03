@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 import torch
@@ -13,6 +14,8 @@ from kernelgym.toolkit.kernelbench.exec_types import (
     set_seed,
 )
 
+logger = logging.getLogger(__name__)
+
 
 def register_and_format_exception(
     exception_type: str,
@@ -23,7 +26,7 @@ def register_and_format_exception(
     max_length: int = 200,
 ):
     if verbose:
-        print(f"[Exception {exception_type}] {str(exception_msg)} ")
+        logger.info("[Exception %s] %s ", exception_type, str(exception_msg))
 
     metadata[exception_type] = exception_msg
     return metadata
@@ -50,7 +53,7 @@ def run_and_check_correctness(
         for trial in range(num_correct_trials):
             trial_seed = correctness_trial_seeds[trial]
             if verbose:
-                print(f"[Eval] Generating Random Input with seed {trial_seed}")
+                logger.info("[Eval] Generating Random Input with seed %s", trial_seed)
 
             set_seed(trial_seed)
             inputs = get_inputs_fn()
@@ -65,8 +68,8 @@ def run_and_check_correctness(
             set_seed(trial_seed)
             model_new = new_model_instance.cuda(device=device)
 
-            print(f"device: {device}")
-            print(f"inputs: {inputs[0].device}")
+            logger.info("device: %s", device)
+            logger.info("inputs: %s", inputs[0].device)
 
             output = model(*inputs)
             torch.cuda.synchronize(device=device)
@@ -82,8 +85,11 @@ def run_and_check_correctness(
                     )
                     metadata["correctness_issue_name"] = "correctness_issue"
                     if verbose:
-                        print(
-                            f"[FAIL] trial {trial}: Output shape mismatch: Expected {output.shape}, got {output_new.shape}"
+                        logger.info(
+                            "[FAIL] trial %s: Output shape mismatch: Expected %s, got %s",
+                            trial,
+                            output.shape,
+                            output_new.shape,
                         )
                     return KernelExecResult(
                         compiled=True, correctness=False, metadata=metadata
@@ -99,15 +105,15 @@ def run_and_check_correctness(
                     metadata.setdefault("avg_difference", []).append(f"{avg_diff:.6f}")
                     metadata["correctness_issue"] = "Output mismatch"
                     if verbose:
-                        print(f"[FAIL] trial {trial}: Output mismatch")
+                        logger.info("[FAIL] trial %s: Output mismatch", trial)
                 else:
                     pass_count += 1
                     if verbose:
-                        print(f"[PASS] trial {trial}: New Model matches Model")
+                        logger.info("[PASS] trial %s: New Model matches Model", trial)
 
             except Exception as e:
-                print("[Error] Exception happens during correctness check")
-                print(f"Error in launching kernel for ModelNew: {e}")
+                logger.error("[Error] Exception happens during correctness check")
+                logger.error("Error in launching kernel for ModelNew: %s", e)
 
                 metadata = register_and_format_exception(
                     "runtime_error", e, metadata, truncate=False
@@ -118,8 +124,10 @@ def run_and_check_correctness(
                 )
 
     if verbose:
-        print(
-            f"[Eval] Pass count: {pass_count}, num_correct_trials: {num_correct_trials}"
+        logger.info(
+            "[Eval] Pass count: %s, num_correct_trials: %s",
+            pass_count,
+            num_correct_trials,
         )
 
     metadata["correctness_trials"] = f"({pass_count} / {num_correct_trials})"
