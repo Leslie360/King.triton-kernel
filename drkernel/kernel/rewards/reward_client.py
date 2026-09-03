@@ -61,18 +61,23 @@ class _HybridHttpWorker:
             client_timeout: Client-side total timeout including queue wait + execution time
             max_retries: Max retry attempts for submission failures
             requeue_max: Max requeues when the result never reaches a terminal state
-                within client_timeout (lost-task recovery, A2).
+                within client_timeout (lost-task recovery).
+
+        Requeue (lost-task recovery): a worker restart can drop an in-flight task,
+        leaving the server-side task stuck in "processing" forever; the old logic
+        returned timeout after polling, silently losing the task. Fix: when the task
+        is still non-terminal at client_timeout, resubmit under a **fresh task_id**
+        (the old id is stuck on the server and would no-op), up to requeue_max times.
+        Only when requeues are exhausted do we return a timeout failure — we neither
+        wait indefinitely nor silently drop.
+
+        The requeue also covers the "stuck-then-failed" case: a task that takes far
+        longer than normal and eventually returns "failed" (rather than "timeout")
+        is treated as a stall and requeued too. A genuine failure usually completes
+        in seconds (compile/run error); a stalled-then-failed task takes much longer.
+        A misjudged requeue merely re-runs once (bounded by requeue_max) — safe,
+        whereas silently dropping is not.
         """
-        # ===== 2026-08-28 A2: 结果等待超时重投 =====
-        # 270 eval 卡死事故: worker 重启丢在途任务 → server 侧任务永远卡在 processing,
-        # 轮询到 client_timeout 超时后旧逻辑只返回 timeout、任务静默丢失。
-        # 修复: 超时(任务仍非终态)即用**新 task_id** 重投, 上限 requeue_max 次;
-        # 只有耗尽重投次数才返回 timeout 失败, 不再无限等待也不静默丢弃。
-        # ===== 2026-08-29 A2 盲区扩展: "卡顿后 failed" =====
-        # step305 事故: 任务在 server 卡很久最终返回 failed(非 timeout), 旧 A2 只重投
-        # status=timeout 不覆盖此类。现: failed 且耗时 > stall_threshold(疑似卡顿而非
-        # 真失败) 也重投。真 failed 通常秒级(编译/运行错), 卡顿后 failed 耗时远超正常。
-        # 误判重投只是多跑一次(requeue_max 上限), 不致命; 宁可重投不静默丢。
         requeue_max = int(requeue_max or 0)
         stall_threshold = max(client_timeout * 0.5, 120.0)  # failed 但耗时过半或>120s 疑似卡顿
         attempt = 0
@@ -89,7 +94,11 @@ class _HybridHttpWorker:
                 new_task["task_id"] = f"parallel_task_retry_{uuid4().hex[:8]}"
                 try:
                     reason = "timeout" if is_timeout else f"stall-failed({elapsed:.0f}s)"
-                    print(f"[HybridWorker] A2 requeue #{attempt}/{requeue_max} reason={reason} old_task_id={task_data.get('task_id','')} new_task_id={new_task['task_id']}")
+                    logger.info(
+                        "[HybridWorker] A2 requeue #%d/%d reason=%s old_task_id=%s new_task_id=%s",
+                        attempt, requeue_max, reason,
+                        task_data.get("task_id", ""), new_task["task_id"],
+                    )
                 except Exception:
                     pass
                 task_data = new_task
@@ -114,15 +123,17 @@ class _HybridHttpWorker:
                             curr = ray.get(self._rate_limit_worker.get_current_count.remote())
                         except Exception:
                             curr = -1
-                        print(f"[HybridWorker] acquire timeout tokens_in_use={curr}")
+                        logger.warning("[HybridWorker] acquire timeout tokens_in_use=%s", curr)
                         return {"status": "failed", "error_message": "rate limiter acquire timeout"}
                     # Log once on first attempt to help debug "server did not receive request".
                     if attempt == 0:
-                        print(f"[HybridWorker] POST /evaluate task_id={task_data.get('task_id', '')} url={self.server_url}")
+                        logger.info("[HybridWorker] POST /evaluate task_id=%s url=%s",
+                                    task_data.get("task_id", ""), self.server_url)
                     resp = self._client.post(f"{self.server_url}/evaluate", json=task_data)
                     # Log status code to help diagnose non-200 responses.
                     try:
-                        print(f"[HybridWorker] POST /evaluate resp={resp.status_code} task_id={task_data.get('task_id','')}")
+                        logger.info("[HybridWorker] POST /evaluate resp=%s task_id=%s",
+                                    resp.status_code, task_data.get("task_id", ""))
                     except Exception:
                         pass
                     # Release token immediately after submission.
@@ -166,7 +177,7 @@ class _HybridHttpWorker:
                         if status != last_status:
                             last_status = status
                             try:
-                                print(f"[HybridWorker] STATUS task_id={task_id} -> {status}")
+                                logger.info("[HybridWorker] STATUS task_id=%s -> %s", task_id, status)
                             except Exception:
                                 pass
                         if status in ("completed", "failed", "timeout", "cancelled"):
@@ -201,12 +212,14 @@ class KernelRewardClient:
         # task_timeout_in_client: client-side timeout including queue wait (should >= task_timeout)
         self.task_timeout_in_client = int(getattr(reward_config, 'task_timeout_in_client', self.timeout))
         self.max_retries = reward_config.max_retries
-        # ===== 2026-08-28 A2: eval 结果等待超时重投 =====
-        # 270 eval 卡死事故: worker 重启丢在途任务 → redis 里任务永远卡在 processing,
-        # 引擎轮询到 task_timeout_in_client 超时后只返回 timeout, 任务静默丢失、无重投。
-        # 修复: 结果等待超时后, 用**新 task_id** 重新提交该任务 (旧 id 在 server 侧已卡死),
-        # 由 result_requeue_max 限制重投次数; 只有耗尽重投次数才返回 timeout 失败。
-        # 默认启用(3 次), 可用 result_requeue_enabled=False / result_requeue_max=N 覆盖。
+        # Lost-task recovery for the result-wait phase: a worker restart can drop an
+        # in-flight task, leaving the task stuck in "processing" on the server; the
+        # engine then polls until task_timeout_in_client and returns a timeout with the
+        # task silently lost. Fix: on result-wait timeout, resubmit the task under a
+        # **fresh task_id** (the old id is stuck server-side), bounded by
+        # result_requeue_max. Only exhausting the requeues returns a timeout failure.
+        # Enabled by default (3 requeues); override with result_requeue_enabled=False
+        # or result_requeue_max=N.
         self.result_requeue_enabled = bool(getattr(reward_config, "result_requeue_enabled", True))
         self.result_requeue_max = int(getattr(reward_config, "result_requeue_max", 3))
         if self.result_requeue_max < 0:
@@ -237,18 +250,19 @@ class KernelRewardClient:
         self.penalty_score = float(reward_config.reward_policy.penalties.penalty_score)
         self.speedup_reward_upper_bound = float(reward_config.speedup_reward_upper_bound)
         self.speedup_reward_lower_bound = float(reward_config.speedup_reward_lower_bound)
-        # 2026-08-26 性能 reward A/B (Step1): correct-gate × speedup
-        #   use_correct_gate=True 时: reward = min(speedup,cap) if correct else -0.5
-        #   (CUDA-L1 社区依据: 线性加权会让模型牺牲正确换速度; 默认 False 不改变现有行为)
+        # Performance-reward correct-gate (Step1): when enabled, reward =
+        # min(speedup, cap) if correct else -0.5, rather than a linear weighting.
+        # Rationale (CUDA-L1 community): a purely linear weighting lets the model
+        # trade correctness for speed. Default False preserves the existing behavior.
         self.use_correct_gate = bool(getattr(reward_config, "use_correct_gate", False))
-        # 2026-08-26 性能 reward Step2: 分档加速 (区分加速档次, 用户提议)
-        #   use_bucketed_speedup=True 时: correct 按 speedup 分档+档内插值 (1.0->0.2 ... 3.0->1.0)
+        # Bucketed speedup (Step2): when enabled and correct, reward by speedup
+        # band with within-band linear interpolation (1.0->0.2 ... 3.0->1.0).
         self.use_bucketed_speedup = bool(getattr(reward_config, "use_bucketed_speedup", False))
-        # ===== 2026-08-28 L6 over-replacement 惩罚 (批次 B 性能包) =====
-        # 头号性能杀手实锤: 40% 样本 <1.0x —— 模型把参考里的优化库算子(cuDNN/cuBLAS 等)
-        # 换成 naive 串行 Triton kernel → 越改越慢。本 flag 使 reward 对"过度替换"扣分。
-        # 注意: 这是 reward_client.py 第 4 个"曾 no-op"的 flag 位 —— 必须被 calculate_reward_speedup
-        # 真实消费 (见 _over_replacement_penalty), 冒烟见 docs/L6_OVERREPLACE_PATCH.md。
+        # Over-replacement penalty: a common performance failure is the model
+        # substituting the optimized library ops in the reference (cuDNN/cuBLAS, etc.)
+        # with naive serial Triton kernels, making the result slower. This flag makes
+        # the reward penalize such "over-replacement". Must be consumed by
+        # calculate_reward_speedup via _over_replacement_penalty.
         self.penalize_over_replacement = bool(getattr(reward_config, "penalize_over_replacement", False))
         # 过度替换的判分超参 (全部可配置, 防硬编码; 冒烟里逐一验证生效)
         self.over_replacement_penalty = float(getattr(reward_config, "over_replacement_penalty", -0.3))
@@ -260,9 +274,10 @@ class KernelRewardClient:
         self.over_replacement_min_custom_kernels = int(
             getattr(reward_config, "over_replacement_min_custom_kernels", 1)
         )
-        # "参考是优化库调用"的判定: reference_backend == pytorch 时参考 op 底层走 cuDNN/cuBLAS 等
-        # (运行配置 reference_backend="pytorch", 见 kernel_trainer.yaml:18)。
-        # 用 set 支持多个优化 backend; 空集表示不检查 backend, 只按速度退化判。
+        # "reference uses an optimized library" check: when reference_backend is a
+        # torch backend, the reference ops dispatch to cuDNN/cuBLAS underneath. A set
+        # supports multiple optimized backends; an empty set disables the backend check
+        # and only the speed-regression heuristic applies.
         _opt = getattr(reward_config, "over_replacement_opt_backends", None)
         self.over_replacement_opt_backends = set(_opt) if _opt else {"pytorch", "native", "torch"}
 
@@ -274,10 +289,8 @@ class KernelRewardClient:
                 return func
         except Exception:
             pass
-        try:
-            print(f"[HybridClient] invalid reward_func_name={self.reward_func_name}, fallback to calculate_reward_like_kernel")
-        except Exception:
-            pass
+        logger.warning("[HybridClient] invalid reward_func_name=%s, fallback to calculate_reward_like_kernel",
+                       self.reward_func_name)
         return self.calculate_reward_like_kernel
 
     def _next_task_id(self, prefix: str) -> str:
@@ -294,8 +307,10 @@ class KernelRewardClient:
         k = kernel_code or ""
         if not k.strip():
             return False, "empty kernel"
-        # 归一化 LLM 常见 Unicode 字符 (在注释/字符串里无害, 但 ast.parse 在代码位会报 invalid character)
-        # 2026-08-21 扩展: 弯引号 + 全角标点 + 破折号 + 箭头 (U+2014/U+2192 等垃圾源, 见 RL_ANALYSIS §1.4)
+        # Normalize common LLM Unicode artifacts before ast.parse: harmless in
+        # comments/strings, but ast.parse raises "invalid character" if they occur
+        # in code positions. Covers smart quotes, full-width punctuation, dashes,
+        # and arrows (U+2014/U+2192 etc.).
         k = k.replace("’", "'").replace("‘", "'")
         k = k.replace("“", '"').replace("”", '"')
         k = k.replace("—", "-").replace("–", "-").replace("―", "-").replace("—", "-")  # 破折号
@@ -349,8 +364,8 @@ class KernelRewardClient:
             error_message = result.get("error_message", "Task failed")
             if error_message == "Task failed":
                 error_message = result.get("error", "Task failed")
-            print(f"[HybridClient] calculate_reward_like_kernel error_message: {error_message}")
-            print(f"[HybridClient] Task failed result: {result}")
+            logger.warning("[HybridClient] calculate_reward_like_kernel error_message: %s", error_message)
+            logger.debug("[HybridClient] Task failed result: %s", result)
             return {
                 "reward": -1.0,
                 "speedup": 0.0,
@@ -361,10 +376,7 @@ class KernelRewardClient:
             }
         # Server returned a decoy kernel; force -1 and carry the marker.
         if result.get("decoy_kernel", False):
-            try:
-                print("[HybridClient] decoy_kernel detected; forcing reward -1")
-            except Exception:
-                pass
+            logger.warning("[HybridClient] decoy_kernel detected; forcing reward -1")
             return {
                 "reward": -1.0,
                 "speedup": 0.0,
@@ -436,10 +448,7 @@ class KernelRewardClient:
             and "num_custom_kernels" not in metadata
             and "num_total_kernels" not in metadata
         ):
-            try:
-                print(f"[HybridClient] coverage fields missing, fallback to 0: keys={list(result.keys())}")
-            except Exception:
-                pass
+            logger.warning("[HybridClient] coverage fields missing, fallback to 0: keys=%s", list(result.keys()))
 
         num_coverage = 0
         if num_total_kernels > 0:
@@ -473,8 +482,8 @@ class KernelRewardClient:
             error_message = result.get("error_message", "Task failed")
             if error_message == "Task failed":
                 error_message = result.get("error", "Task failed")
-            print(f"[HybridClient] calculate_reward_like_kernel error_message: {error_message}")
-            print(f"[HybridClient] Task failed result: {result}")
+            logger.warning("[HybridClient] calculate_reward_like_kernel error_message: %s", error_message)
+            logger.debug("[HybridClient] Task failed result: %s", result)
 
             return_result = {
                 "reward": penalty_score,
@@ -491,12 +500,8 @@ class KernelRewardClient:
 
             return return_result
         # Server returned a decoy kernel; force penalty and carry the marker.
-        # TODO Temporary disable decoy kernel detection
         if result.get("decoy_kernel", False):
-            try:
-                print("[HybridClient] decoy_kernel detected; forcing reward -1")
-            except Exception:
-                pass
+            logger.warning("[HybridClient] decoy_kernel detected; forcing reward -1")
             return {
                 "reward": penalty_score,
                 "speedup": 0.0,
@@ -533,11 +538,10 @@ class KernelRewardClient:
             num_total_kernels = coverage_dict["num_total_kernels"]
             custom_kernel_cuda_time_in_profiling_us = coverage_dict["custom_kernel_cuda_time_in_profiling_us"]
             total_kernel_run_time_in_profiling_us = coverage_dict["total_kernel_run_time_in_profiling_us"]
-            print(f"[DEBUG] coverage: {coverage}")
-            print(f"[DEBUG] num_custom_kernel: {num_custom_kernel}")
-            print(f"[DEBUG] num_total_kernels: {num_total_kernels}")
-            print(f"[DEBUG] custom_kernel_cuda_time_in_profiling_us: {custom_kernel_cuda_time_in_profiling_us}")
-            print(f"[DEBUG] total_kernel_run_time_in_profiling_us: {total_kernel_run_time_in_profiling_us}")
+            logger.debug("coverage: %s num_custom_kernel: %s num_total_kernels: %s "
+                         "custom_us: %s total_us: %s",
+                         coverage, num_custom_kernel, num_total_kernels,
+                         custom_kernel_cuda_time_in_profiling_us, total_kernel_run_time_in_profiling_us)
             if self.reward_config.coverage_reward.enable:
                 final_reward += self.reward_config.coverage_reward.weight * coverage
 
@@ -556,10 +560,13 @@ class KernelRewardClient:
         }
 
     def _bucketed_speedup_reward(self, speedup: float) -> float:
-        """分档+档内插值加速 reward (2026-08-26, 用户提议; 2026-08-27 B1 改可配置凸曲线):
-        默认 1.0x->0.2 / 1.2x->0.4 / 1.5x->0.6 / 2.0x->0.8 / 3.0x->1.0;
-        B1 凸曲线(冲3x激励最强): 1.0->0.02 / 1.2->0.08 / 1.5->0.20 / 2->0.35 / 2.5->0.65 / 3->1.0
-        档内线性插值。可经 reward_config.bucket_bands 覆盖。"""
+        """Bucketed speedup reward with within-band linear interpolation.
+
+        Default bands: 1.0->0.2 / 1.2->0.4 / 1.5->0.6 / 2.0->0.8 / 3.0->1.0.
+        A convex variant that rewards pushing toward 3x hardest:
+        1.0->0.02 / 1.2->0.08 / 1.5->0.20 / 2->0.35 / 2.5->0.65 / 3->1.0.
+        Override via reward_config.bucket_bands.
+        """
         spd = min(speedup, 3.0)
         bands = getattr(getattr(self, "reward_config", None), "bucket_bands", None)
         if not bands:
@@ -574,25 +581,32 @@ class KernelRewardClient:
         return 1.0
 
     def _over_replacement_penalty(self, result: Dict[str, Any], speedup: float) -> float:
-        """过度替换惩罚 (2026-08-28 L6): 模型把参考里的优化库算子替换成 naive 慢实现时扣分。
+        """Over-replacement penalty: penalize substituting the reference's optimized
+        library ops with naive slow implementations.
 
-        返回 <= 0 的惩罚值 (0 = 不触发)。flag `penalize_over_replacement` 关闭时恒返回 0。
-        可组合启发式 (每条都从 result/metadata 读真实信号, 可单独关):
-          H1 替换+退化 (主判据): 模型写了 custom kernel (num_custom_kernel>0) 且
-             overall speedup 相对参考退化 (<1.0) 且参考是优化库调用 → 扣 over_replacement_penalty。
-             物理含义: 参考里本来是 cuDNN/cuBLAS 等优化库算子(快), 模型用 naive Triton
-             串行核替换后整体反而变慢 = 过度替换。
-          H2 大覆盖替换: num_custom_kernel/num_total_kernels 高 (替换了多数算子) 仍整体退化
-             → 更大扣分 (默认乘 1.5 系数, 可配 over_replacement_coverage_factor)。
-             物理含义: 把整张图几乎所有优化 op 都换成慢核, 替换面越广危害越大。
-          H3 时间占比不匹配: custom kernel 占 profiling 时间主导 (time_coverage 高) 却整体退化
-             → 说明慢实现是主耗时来源, 追加小扣分 (默认 +0.1 叠加, 可配)。
+        Returns a value <= 0 (0 = not triggered). Always 0 when the
+        `penalize_over_replacement` flag is off. Composable heuristics, each reading
+        real signals from result/metadata:
+          H1 replace-and-degrade (primary): the model wrote a custom kernel
+             (num_custom_kernel>0), overall speedup regressed relative to reference
+             (<1.0), and the reference is an optimized-library call
+             -> deduct over_replacement_penalty. Semantics: the reference used fast
+             cuDNN/cuBLAS-style ops, and the naive serial Triton replacement made the
+             whole thing slower = over-replacement.
+          H2 wide replacement: a high num_custom_kernel/num_total_kernels ratio (most
+             ops replaced) that still regresses overall -> a larger deduction (default
+             x1.5 via over_replacement_coverage_factor). Replacing almost every
+             optimized op with a slow kernel is the most harmful.
+          H3 timing mismatch: custom kernels dominate profiling time (high
+             time_coverage) yet the whole thing regresses -> the slow implementation
+             is the main cost, so add a small deduction (default +0.1 via
+             over_replacement_time_extra).
 
-        "参考是优化库调用"判定: reference_backend ∈ over_replacement_opt_backends
-        (默认 {pytorch,native,torch}, 因为 pytorch 参考 op 底层走 cuDNN/cuBLAS)。
-        无参考 backend 字段时视为"无法判定", 仅靠速度退化+替换触发 H1 主判据。
-
-        防 no-op: 本函数是 flag 唯一真实消费者, 冒烟见 docs/L6_OVERREPLACE_PATCH.md。
+        "Reference is an optimized library call" is decided by
+        reference_backend ∈ over_replacement_opt_backends (default {pytorch,native,
+        torch}, since torch reference ops dispatch to cuDNN/cuBLAS underneath). When no
+        backend field is present, the backend check is inconclusive and only the
+        speed-regression + replacement triggers H1.
         """
         if not self.penalize_over_replacement:
             return 0.0
@@ -638,39 +652,30 @@ class KernelRewardClient:
             cov_factor = float(getattr(self.reward_config, "over_replacement_coverage_factor", 1.5))
             if coverage >= 0.5:
                 penalty *= cov_factor
-                try:
-                    print(f"[HybridClient] over-replacement H2: coverage={coverage:.2f} penalty={penalty:.3f}")
-                except Exception:
-                    pass
+                logger.debug("[HybridClient] over-replacement H2: coverage=%.2f penalty=%.3f", coverage, penalty)
 
         # H3: 慢实现主耗时 → 追加
         if total_us > 0 and custom_us / total_us >= 0.5:
             extra = float(getattr(self.reward_config, "over_replacement_time_extra", 0.1))
             penalty -= extra
-            try:
-                print(f"[HybridClient] over-replacement H3: time_cov={custom_us/total_us:.2f} extra={extra}")
-            except Exception:
-                pass
+            logger.debug("[HybridClient] over-replacement H3: time_cov=%.2f extra=%s", custom_us / total_us, extra)
 
-        try:
-            print(f"[HybridClient] over-replacement penalty: speedup={speedup:.3f} "
-                  f"custom={num_custom_kernel}/{num_total_kernels} backend={backend!r} penalty={penalty:.3f}")
-        except Exception:
-            pass
+        logger.info("[HybridClient] over-replacement penalty: speedup=%.3f custom=%s/%s backend=%r penalty=%.3f",
+                    speedup, num_custom_kernel, num_total_kernels, backend, penalty)
         return penalty
 
     def calculate_reward_speedup(self, result: Dict[str, Any]) -> Dict[str, Any]:
         penalty_score = self.penalty_score
 
         if result.get("status") != "completed":
-            
+
             error_message = result.get("error_message", "Task failed")
             if error_message == "Task failed":
                 error_message = result.get("error", "Task failed")
-            print(f"[HybridClient] calculate_reward_like_kernel error_message: {error_message}")
-            print(f"[HybridClient] Task failed result: {result}")
+            logger.warning("[HybridClient] calculate_reward_like_kernel error_message: %s", error_message)
+            logger.debug("[HybridClient] Task failed result: %s", result)
 
-            # === RL v4 语法/编译惩罚 (2026-08-21) ===
+            # === RL v4 语法/编译惩罚 ===
             # 目的: 让梯度区分"语法垃圾"(-1) vs "编译失败"(-0.5) vs "错但对"(0),
             # 治 RL 漂移主因 (之前全统一 penalty_score=0, 垃圾和错但对同分)。
             # 判据: 基于 error_message 的 cheap-filter / 编译错误标记。
@@ -683,7 +688,7 @@ class KernelRewardClient:
                 reward_fail = -1.0   # 语法垃圾 (cheap-filter / ast 不过)
             elif "kernel evaluation failed" in em_lower or "compilation" in em_lower \
                  or "compile" in em_lower:
-                reward_fail = -1.0   # 编译失败 = 硬门槛 (2026-08-23: -0.5→-1.0, 与语法同级, 防刷编译)
+                reward_fail = -1.0   # 编译失败 = 硬门槛 (与语法同级, 防刷编译)
             # 其余 (运行时错误/超时/任务失败) → penalty_score (0)
 
             return_result = {
@@ -701,12 +706,8 @@ class KernelRewardClient:
 
             return return_result
         # Server returned a decoy kernel; force penalty and carry the marker.
-        # TODO Temporary disable decoy kernel detection
         if result.get("decoy_kernel", False):
-            try:
-                print("[HybridClient] decoy_kernel detected; forcing reward -1")
-            except Exception:
-                pass
+            logger.warning("[HybridClient] decoy_kernel detected; forcing reward -1")
             return {
                 "reward": penalty_score,
                 "speedup": 0.0,
@@ -735,9 +736,10 @@ class KernelRewardClient:
         if reward_speedup < self.speedup_reward_lower_bound:
             reward_speedup = 0.0
 
-        # 2026-08-26 A/B (Step1, correct-gate): reward = min(speedup,cap) if correct else -0.5
-        # 默认 False 保留线性加权; 开 gate 后正确时按 speedup 奖, 不正确时硬 -0.5
-        # 2026-08-27 B1: + correct_bonus(正确恒加) + wrong_floor(可配置, 默认 -0.5, B1 用 -0.2)
+        # correct-gate A/B: reward = min(speedup,cap) if correct else wrong_floor.
+        # Default False keeps the linear weighting; with the gate on, correctness is
+        # rewarded by speedup and incorrectness is floored at wrong_floor. A correct
+        # result additionally gets a fixed correct_bonus.
         _correct_bonus = float(getattr(self.reward_config, "correct_bonus", 0.0) or 0.0)
         _wrong_floor = float(getattr(self.reward_config, "wrong_floor", -0.5) or -0.5)
         if self.use_correct_gate:
@@ -746,18 +748,22 @@ class KernelRewardClient:
             else:
                 reward = (reward_speedup if correctness else _wrong_floor) + (_correct_bonus if correctness else 0.0)
             if compiled and not correctness:
-                print(f"[HybridClient] gate penalty: compiled-but-wrong reward {reward}")
+                logger.info("[HybridClient] gate penalty: compiled-but-wrong reward %s", reward)
         else:
             reward = self.init_correct_weight * correctness + self.init_performance_weight * reward_speedup
 
-        # 2026-08-23 (reward 修复): 编译成功但执行错误 = 显式负分 (-0.5), 不再同分 0
-        # 目的: 让模型主梯度来自"从错误变正确", 而非"从语法错变编译对" (编译=硬门槛, 正确=主信号)
+        # Compiled-but-executed-wrong is an explicit negative, not tied to the generic
+        # penalty_score (0): the model's main gradient should come from "wrong -> right",
+        # not from "syntax-wrong -> compiled" (compilation is a hard gate, correctness
+        # is the primary signal).
         if compiled and not correctness and not self.use_correct_gate:
             reward = -0.5
-            print(f"[HybridClient] compiled-but-wrong penalty: reward {reward}")
+            logger.info("[HybridClient] compiled-but-wrong penalty: reward %s", reward)
 
-        # P2 fix (2026-08-21 终审): num_custom_kernel 从 result/metadata 真实读取, 不再硬编码 0
-        # (否则伪编译惩罚恒真, 对"有 kernel 但错"的样本也罚, 语义不准确)
+        # num_custom_kernel is read from result/metadata rather than hardcoded to 0;
+        # otherwise the pseudo-compilation penalty always fires and wrongly penalizes
+        # kernels that do contain a custom kernel but are incorrect.
+
         def _nck() -> int:
             for scope in (result, result.get("metadata") or {}):
                 for k in ("num_custom_kernels", "num_custom_kernel"):
@@ -774,11 +780,13 @@ class KernelRewardClient:
         custom_kernel_cuda_time_in_profiling_us = 0
         total_kernel_run_time_in_profiling_us = 0
 
-        # 伪编译惩罚 (2026-08-21 review §3.1/§4.2): compiled 但没真正执行 custom kernel = soft decoy
-        # (profiling 开后才真实可见; 模型在写"能编译但空实现"的 kernel, 应惩罚而非同分 0)
+        # Pseudo-compilation penalty: compiled but with no custom kernel actually
+        # executed (visible when profiling is on) is a "soft decoy" — the model wrote
+        # a kernel that compiles but is an empty implementation, which should be
+        # penalized rather than scored 0.
         if compiled and num_custom_kernel == 0 and not correctness:
             reward -= 0.3
-            print(f"[HybridClient] soft-decoy penalty: compiled=True num_custom_kernel=0 (reward {reward})")
+            logger.info("[HybridClient] soft-decoy penalty: compiled=True num_custom_kernel=0 (reward %s)", reward)
 
         # if self.reward_config.coverage_reward.enable and correctness:
         final_reward = reward
@@ -790,24 +798,24 @@ class KernelRewardClient:
             custom_kernel_cuda_time_in_profiling_us = coverage_dict["custom_kernel_cuda_time_in_profiling_us"]
             total_kernel_run_time_in_profiling_us = coverage_dict["total_kernel_run_time_in_profiling_us"]
 
-            print(f"[DEBUG] coverage: {coverage}")
-            print(f"[DEBUG] num_custom_kernel: {num_custom_kernel}")
-            print(f"[DEBUG] num_total_kernels: {num_total_kernels}")
-            print(f"[DEBUG] custom_kernel_cuda_time_in_profiling_us: {custom_kernel_cuda_time_in_profiling_us}")
-            print(f"[DEBUG] total_kernel_run_time_in_profiling_us: {total_kernel_run_time_in_profiling_us}")
+            logger.debug("coverage: %s num_custom_kernel: %s num_total_kernels: %s "
+                         "custom_us: %s total_us: %s",
+                         coverage, num_custom_kernel, num_total_kernels,
+                         custom_kernel_cuda_time_in_profiling_us, total_kernel_run_time_in_profiling_us)
 
             if self.reward_config.coverage_reward.enable:
                 final_reward += self.reward_config.coverage_reward.weight * coverage
 
-        # ===== 2026-08-28 L6 over-replacement 惩罚 (批次 B 性能包, flag 真实消费点) =====
-        # 过度替换 = 头号性能杀手 (40% 样本 <1.0x)。正确但慢的样本若把优化库算子换成
-        # naive Triton 串行核, 在 base reward 之上再扣分。flag 关时恒 0 (与现有行为完全一致)。
+        # Over-replacement penalty: a correct-but-slow sample that swapped optimized
+        # library ops for naive serial Triton kernels gets an extra deduction on top
+        # of the base reward. When the flag is off this stays 0 (identical to the
+        # existing behavior).
         if self.penalize_over_replacement and correctness:
             _over_penalty = self._over_replacement_penalty(result, speedup)
             if _over_penalty < 0:
                 final_reward += _over_penalty
-                print(f"[HybridClient] over-replacement applied: reward {final_reward:.3f} "
-                      f"(delta {_over_penalty:.3f}) speedup={speedup:.3f}")
+                logger.info("[HybridClient] over-replacement applied: reward %.3f (delta %.3f) speedup=%.3f",
+                            final_reward, _over_penalty, speedup)
 
         return {
             "reward": final_reward,
@@ -914,8 +922,10 @@ class KernelRewardClient:
 
         # Validate timeout invariant: client timeout should be >= server timeout
         if effective_timeout_in_client < effective_timeout:
-            print(f"[WARNING] task_timeout_in_client ({effective_timeout_in_client}s) < task_timeout ({effective_timeout}s)")
-            print(f"[WARNING] Adjusting task_timeout_in_client to match task_timeout to respect timeout invariant")
+            logger.warning(
+                "task_timeout_in_client (%ss) < task_timeout (%ss); raising to match the invariant",
+                effective_timeout_in_client, effective_timeout,
+            )
             effective_timeout_in_client = effective_timeout
         obj_refs: List[ray.ObjectRef] = []
         index_map: List[int] = []  # worker submission order -> original index
@@ -930,10 +940,7 @@ class KernelRewardClient:
             ep = task.get("entry_point", "Model")
             ok, missing = self._preflight_validate(task.get("reference_code", ""), kcode, ep)
             if not ok:
-                try:
-                    print(f"[HybridClient] preflight failed(idx={idx}): missing {missing} entry_point={ep}")
-                except Exception:
-                    pass
+                logger.info("[HybridClient] preflight failed(idx=%s): missing %s entry_point=%s", idx, missing, ep)
                 prefilled[idx] = {
                     "reward": penalty_score,
                     "speedup": 0.0,
@@ -972,7 +979,8 @@ class KernelRewardClient:
                             return (s or "")[:n]
                         except Exception:
                             return str(s)[:n]
-                    print(f"[HybridClient] DEBUG(entry_point={ep})\n[ref]\n{task.get('reference_code','')}\n[kernel]\n{kcode}")
+                    logger.debug("[HybridClient] DEBUG(entry_point=%s)\n[ref]\n%s\n[kernel]\n%s",
+                                 ep, task.get("reference_code", ""), kcode)
             except Exception:
                 pass
 
@@ -995,7 +1003,7 @@ class KernelRewardClient:
 
             # enforce detect decoy kernel if validate
             if payload["is_valid"]:
-                print(f"Enforce detect decoy kernel if validate: {payload['detect_decoy_kernel']}")
+                logger.debug("Enforce detect decoy kernel if validate: %s", payload["detect_decoy_kernel"])
                 payload["detect_decoy_kernel"] = True
 
             ucache = task.get("use_reference_cache", use_reference_cache)
@@ -1026,7 +1034,7 @@ class KernelRewardClient:
 
         try:
             skipped = len(prefilled)
-            print(f"[HybridClient] batch submitted={submitted} skipped={skipped}")
+            logger.info("[HybridClient] batch submitted=%s skipped=%s", submitted, skipped)
         except Exception:
             pass
 
@@ -1069,8 +1077,11 @@ class KernelRewardClient:
                 if len(pending) > 10:
                     pending_summary += f" ... (+{len(pending)-10} more)"
                 
-                print(f"[BatchHeartbeat] hybrid: completed={len(results)}/{len(obj_refs)}, pending={len(pending)}, elapsed={elapsed:.1f}s tokens_in_use={in_use}/{self.rate_limit}")
-                print(f"[BatchHeartbeat] pending_tasks: {pending_summary}")
+                logger.info(
+                    "[BatchHeartbeat] hybrid: completed=%s/%s, pending=%s, elapsed=%.1fs tokens_in_use=%s/%s",
+                    len(results), len(obj_refs), len(pending), elapsed, in_use, self.rate_limit,
+                )
+                logger.info("[BatchHeartbeat] pending_tasks: %s", pending_summary)
         # Merge back to original order.
         merged: List[Optional[Dict[str, Any]]] = [None] * len(tasks)
         # Fill prefilled first.
@@ -1079,9 +1090,10 @@ class KernelRewardClient:
         # Then fill worker results.
         for idx_in_obj, data in results:
             orig_idx = index_map[idx_in_obj]
-            # === 拍平 metadata 的 profiling 字段到顶层 (2026-08-21 coverage bug 修复) ===
-            # eval server 把 num_custom_kernels(复数)/custom_kernel_cuda_time 等放 metadata,
-            # 而 kernel_async + reward 函数从顶层(单数 num_custom_kernel)读 → 不加这个 coverage 恒为 0
+            # Flatten the profiling fields from metadata to the top level. The eval
+            # server stores num_custom_kernels (plural) / custom_kernel_cuda_time etc.
+            # under metadata, while the reward functions read the singular
+            # num_custom_kernel from the top level — without this, coverage is always 0.
             _md = data.get("metadata") if isinstance(data, dict) else None
             if isinstance(_md, dict):
                 if "num_custom_kernels" in _md and "num_custom_kernel" not in data:
