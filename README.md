@@ -98,6 +98,22 @@ To keep reported numbers reproducible and comparable, the project enforces the f
 | Dr.Kernel-14B | 47.8% (best-turn, STTS†) | arXiv 2602.05885; sampling budget not disclosed |
 | daVinci-14B | 27.1% (L2 Fast@1.2, best-turn) | arXiv 2606.16497 |
 
+### Measurement provenance
+
+Every headline figure above is a self-measured number with the following fixed provenance; do not reproduce or cite it without the same conditions:
+
+- **Physical machine**: node `205` (`10.199.126.205`, 8×A800). Timed numbers are machine-bound and valid only for node 205 — the reference timing cache was rebuilt on this machine (a cache built on a different node is invalid here).
+- **Reference cache (refcache)**: **ON** — the reference implementation is not re-timed during grading; the speedup denominator is fixed, removing run-level jitter.
+- **Protocol / caliber**: 8 samples × 5 repair turns, **best-of-history** (per-problem best submission across all samples × all turns), KernelBench L2 (100 problems), speedup threshold ≥ 1.2×, TF32 enabled (TF32-ON).
+- **Precision**: reported as the **mean of n=3 independent evaluation runs**, with a 3-run sample std of **±6.2pp** (single-run noise is ±3–6pp; conclusions require the mean of ≥3 runs).
+- **Aggregation**: `scripts/agg_eval.py` is the single authoritative aggregator (four-piece provenance: script version incl. SHA, sampling budget, extractor version, caliber version).
+- **Measurement timestamps**: RL headline locked 2026-09-02; SFT v2 numbers measured on node 205 in early September 2026 (eval runs 09-03–09-04, **pending final lock**).
+
+Status flags on the SFT v2 row:
+
+- **SFT v2 65.0% is PENDING final lock** — it is not yet the release headline. Treat it as statistically indistinguishable from the RL baseline pending post-release re-verification.
+- The single **72% run is flagged**: it is one run, not a locked figure, and must not be quoted as the SFT v2 result.
+
 Protocol caveats:
 
 - fast@1 vs fast@1.2, best-of-history vs best-turn, and speedup ≥1.0× vs ≥1.2× are different calibers and must not be compared directly. daVinci reports both: 27.1% = L2 Fast@1.2, 70.6% = L2 Fast@1.
@@ -117,11 +133,32 @@ bash setup.sh          # equivalent to: pip install -r requirements.txt
 # 2. Editable install (provides kernelgym-server and other CLI entry points)
 pip install -e .
 
-# 3. Start the evaluation server (default port 10907, override with API_PORT)
+# 3. One-click local smoke: starts redis + eval server + a single-GPU worker,
+#    then runs the smoke test (health + a real POST /evaluate grading check)
+bash scripts/launch_local.sh
+python3 smoke_test.py http://localhost:10907
+```
+
+`scripts/launch_local.sh` starts everything a fresh machine needs — a local
+Redis instance, the KernelGym grading API server, and one GPU worker on
+`cuda:0` — and prints the server URL. Default port is **10907** (override with
+`API_PORT`, e.g. `API_PORT=8004 bash scripts/launch_local.sh`). On machines
+without a CUDA-visible GPU, the server still starts for `/health` but
+`smoke_test.py` prints a clear skip message for the grading-chain check.
+
+To run the server and worker manually instead (e.g. when an eval server already
+exists elsewhere):
+
+```bash
+# Start the evaluation server (default port 10907, override with API_PORT)
 kernelgym-server
 
-# 4. Smoke test (checks server health)
-python3 smoke_test.py http://localhost:10907
+# Start a single GPU worker in a second terminal (required for grading)
+kernelgym-single-worker --worker-id worker-1 --device cuda:0
+
+# Smoke test (health; add --evaluate to also run a real grading task when a
+# GPU worker is registered)
+python3 smoke_test.py http://localhost:10907 --evaluate
 ```
 
 CLI entry points (from `pyproject.toml [project.scripts]`):
