@@ -49,16 +49,22 @@ jobs:
 
       # Note: the core dependencies torch/triton are large and costly to install
       # in CI, and installs are often flaky. Strategy is two-layer:
-      #   1) --no-deps installs only this package's pure-Python layout so import
-      #      paths resolve;
+      #   1) install only this package's lightweight runtime deps + test tooling
+      #      (no torch/triton) so import paths resolve and pure-logic tests run;
       #   2) best-effort CPU-only torch install that never blocks the job: the
       #      gpu_available fixture in conftest wraps the torch import in
       #      try/except, so pure-logic tests still run without torch.
-      # Test tooling must be installed separately: --no-deps also skips the
-      # dependencies of the [dev] extra, which would leave `pytest` missing
-      # (exit code 127) when the test step runs.
-      - name: Install test tooling
-        run: pip install pytest pytest-cov
+      # Earlier versions used `pip install -e . --no-deps` -- that flag skips
+      # even pydantic/fastapi, which surfaced only after pytest itself was
+      # installed (the next hidden missing dep). The explicit list below is
+      # what makes the CPU-only job reproducible without dragging torch in.
+      - name: Install runtime deps and test tooling (no torch/triton)
+        run: |
+          pip install \
+            pytest pytest-cov \
+            pydantic pydantic-settings \
+            fastapi uvicorn \
+            redis aiohttp psutil numpy
 
       - name: Install package (editable, no heavy deps)
         run: pip install -e . --no-deps
