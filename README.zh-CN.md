@@ -142,7 +142,7 @@ King.triton-kernel/
 ├── kernelgym/   # GPU 分布式评估环境（核心库 + server + worker）
 ├── evals/       # 评测口径与聚合（agg_eval.py / compare_gs_eval.py / repro_pass_at_k.py）
 ├── docs/        # ARCHITECTURE.md（架构与口径）/ ROADMAP.md
-├── tests/       # 166 个测试函数（CI 跑 CPU 纯逻辑子集）
+├── tests/       # 132 个测试函数（CI 跑 CPU 纯逻辑子集）
 ├── setup.sh      # 依赖安装
 └── smoke_test.py
 ```

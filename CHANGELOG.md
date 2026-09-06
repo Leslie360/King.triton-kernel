@@ -2,6 +2,20 @@
 
 This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.1.1] - 2026-09-06
+
+### Removed
+- Training-side stack (`drkernel/kernel/rewards+data`, verl/ray-integrated, Apache-2.0 files) cut from the OSS package — the repository now ships the evaluation environment and caliber tooling only, under the MIT License (NOTICE simplified).
+- `[train]` optional dependency extra and its verl/ray/vllm requirements.
+- `tests/test_reward_math.py` (tested the removed training-side reward math).
+
+### Changed
+- SFT v2 result locked at **68.3% ± 6.2pp** (n=3), co-headline with the RL baseline (61.0%).
+- Internal node identifiers / pod names replaced with neutral hardware descriptions.
+- Default port example corrected to 10907.
+
+### Fixed
+- README cross-references to removed files and stale test-count claims (now 132).
 ## [0.1.0] - 2026-08-31
 
 Initial public release.

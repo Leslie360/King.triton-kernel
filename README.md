@@ -124,7 +124,7 @@ Protocol caveats:
 
 **Requirements**: Python ≥ 3.10, Linux + NVIDIA GPU (driver-visible is enough; CUDA ships with torch/triton), Redis.
 
-**Verified environment** (the exact stack on which all headline numbers and the 164-test suite were produced):
+**Verified environment** (the exact stack on which all headline numbers and the 132-test suite were produced):
 
 | Component | Version / note |
 |---|---|
@@ -193,7 +193,7 @@ King.triton-kernel/
 ├── kernelgym/   # Distributed GPU evaluation environment (core lib + server + worker)
 ├── evals/       # Aggregation and calibers (agg_eval.py / compare_gs_eval.py / repro_pass_at_k.py)
 ├── docs/        # ARCHITECTURE.md (architecture & calibers) / ROADMAP.md
-├── tests/       # 166 test functions (CI runs the CPU-only logic subset)
+├── tests/       # 132 test functions (CI runs the CPU-only logic subset)
 ├── setup.sh      # Dependency installation
 └── smoke_test.py
 ```
