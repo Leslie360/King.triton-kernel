@@ -5,20 +5,4 @@ King.triton-kernel — Open-source component compliance statement
 
 The LICENSE at the repository root is the MIT License (Copyright (c) 2026 King.triton-kernel contributors).
 
-The following files under `drkernel/kernel/` originate from ByteDance Ltd. and its affiliates (the verl /
-Dr.Kernel ecosystem) and retain their Apache License 2.0 copyright headers (Copyright 2025 Bytedance Ltd.
-and/or its affiliates):
-
-- drkernel/kernel/rewards/__init__.py
-- drkernel/kernel/rewards/kernel_reward.py
-- drkernel/kernel/rewards/coverage_helper.py
-- drkernel/kernel/data/__init__.py
-- drkernel/kernel/data/dataset_utils.py
-- drkernel/kernel/data/kernel_prompts.py
-
-Per Apache License 2.0 §4 and MIT compatibility, the above files remain licensed under Apache-2.0,
-retain their original copyright notices, and assert no additional claims after modification.
-The full text of Apache License 2.0 is available at:
-https://www.apache.org/licenses/LICENSE-2.0
-
-All other parts (kernelgym/, evals/, docs/, root scripts) are MIT.
+All code shipped in this repository (kernelgym/, evals/, docs/, scripts/, tests/, root config) is licensed under the MIT License. No Apache-2.0 or other third-party licensed source files are included in this repository.

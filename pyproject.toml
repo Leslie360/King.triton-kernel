@@ -5,12 +5,12 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "king-triton-kernel"
 version = "0.1.0"
-description = "RLVR training pipeline for Triton kernel generation — teach an LLM to write correct and faster kernels (14B · single 8xA800 node)"
+description = "Caliber-disciplined evaluation toolkit and verifier-driven agent-RL framework for Triton kernel generation — reward execution correctness over compilation, with reference-timing discipline"
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.10"
 authors = [{ name = "King.triton-kernel contributors" }]
-keywords = ["triton", "kernel", "rlvr", "reinforcement-learning", "kernel-generation", "cuda"]
+keywords = ["triton", "kernel", "evaluation", "verifier", "kernel-generation", "cuda"]
 classifiers = [
     "Programming Language :: Python :: 3",
     "License :: OSI Approved :: MIT License",
@@ -30,16 +30,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Training-side RL stack (verl integration); separate extra, keeps the Apache-2.0
-# copyright header (see the note in drkernel/kernel/LICENSE).
-train = [
-    "verl",
-    "ray>=2.4",
-    "vllm>=0.8",
-    "httpx",
-    "pandas",
-    "pyarrow",
-]
+
 # Evaluation tooling (evals/) aggregation scripts
 eval = [
     "pandas",
@@ -76,7 +67,7 @@ addopts = "-m 'not gpu and not redis and not slow'"
 [tool.ruff]
 line-length = 110
 target-version = "py310"
-extend-exclude = ["drkernel", "docs", "evals"]
+extend-exclude = ["docs", "evals"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "W", "UP", "B"]

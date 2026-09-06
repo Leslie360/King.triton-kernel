@@ -6,9 +6,6 @@
 torch>=2.8
 triton>=3.4
 numpy
-vllm>=0.8.5
-verl  # RL training framework (see drkernel/verl_patch)
-ray
 fastapi
 uvicorn>=0.24
 pydantic>=2

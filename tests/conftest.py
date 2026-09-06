@@ -11,7 +11,6 @@ Goals:
 
 from __future__ import annotations
 
-import os
 import sys
 import types
 from pathlib import Path
@@ -193,21 +192,12 @@ def reward_deps_stub(monkeypatch):
     """Install sys.modules stubs for ray/httpx/verl, then load reward_client.py
     directly by file path.
 
-    We load it standalone (importlib.util.spec_from_file_location) rather than
-    `from drkernel.kernel.rewards import reward_client` because that package's
-    __init__.py contains a broken non-relative import
-    (`from kernel.rewards.kernel_reward import ...`) that fails regardless of
-    the ray/verl stubs. reward_client.py itself only uses absolute imports, so
-    loading it on its own is safe and keeps this test CPU-only."""
+    The training-side reward math (drkernel/reward_client.py) was removed in
+    v0.1.1 (training stack cut from the OSS package); this loader no longer
+    applies.
+    """
     _install_optional_stubs(monkeypatch)
-
-    import importlib.util
-
-    _path = _REPO_ROOT / "drkernel" / "kernel" / "rewards" / "reward_client.py"
-    spec = importlib.util.spec_from_file_location("reward_client", _path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    raise FileNotFoundError("reward_client removed")
 
 
 def pytest_collection_modifyitems(config, items):

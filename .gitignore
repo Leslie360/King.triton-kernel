@@ -1,4 +1,5 @@
 # Private data / artifacts (not open-sourced)
+drkernel/
 w3_results/
 KernelGYM/drkernel/checkpoints/
 KernelGYM/drkernel/outputs/

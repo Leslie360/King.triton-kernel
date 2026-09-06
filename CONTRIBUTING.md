@@ -27,11 +27,7 @@ pip install -e ".[dev]"
 
 > **Heavy dependencies**: `torch` / `triton` are core dependencies (installed via the `[project] dependencies` when running `pip install -e ".[dev]"`). If your machine already has CUDA builds of torch/triton, you can skip that part; on CI they often fail to install due to size, and pure logic tests do not depend on them (see the testing section below).
 
-For the training side (verl / ray / vllm for the RL integration in `drkernel/`), install the `[train]` extra separately and use it in an isolated environment:
-
-```bash
-pip install -e ".[train]"
-```
+The RL training stack (verl-integrated) is not part of this repository; it consumes the server-returned verdicts produced by `kernelgym/`.
 
 ---
 
@@ -79,7 +75,7 @@ The `[dev]` extra already includes ruff; pre-commit (`[dev]`) is also available.
 
 - Strictly follow `ruff check` (select: E, F, I, W, UP, B).
 - Format with `ruff format`; do not hand-align.
-- `extend-exclude` already excludes `drkernel/`, `docs/`, `evals/` — do not bypass lint when changing business code.
+- `extend-exclude` already excludes `docs/` and `evals/` — do not bypass lint when changing business code.
 
 ---
 
@@ -129,7 +125,7 @@ This repository must not contain: private datasets, training checkpoints, intern
 
 - ❌ No absolute paths / internal hostnames / internal IPs.
 - ❌ No large files such as `.ckpt` / `.safetensors` / log dumps.
-- ✅ Only real code copies (`kernelgym/`, `drkernel/`, `evals/` are standalone copies, not symlinks).
+- ✅ Only real code copies (`kernelgym/` is a standalone copy, not a symlink).
 - List and confirm before deleting files; follow project hard rules.
 
 ---

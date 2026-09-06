@@ -32,7 +32,7 @@
 | 交付物 | 说明 | 适用场景 |
 |---|---|---|
 | **kernelgym 评估环境** | 自包含的 GPU 分布式判分服务：子进程隔离执行、CUDA 事件计时、正确性校验、参考计时缓存 | 任何需要「真实执行验证」的代码生成任务，可直接复用，不绑定本项目训练栈 |
-| **RLVR 训练方法** | 以「执行正确」为核心奖励信号的多轮修复强化学习管线（verl 生态，奖励实现见 `drkernel/`） | kernel / 代码生成类 RL 后训练 |
+| **RLVR 训练方法** | 以「执行正确」为核心奖励信号的多轮修复强化学习管线（训练栈未随本仓库发布，见安装说明） | kernel / 代码生成类 RL 后训练 |
 
 目标读者：
 
@@ -94,7 +94,7 @@ SKILL 注入 ──► 修复飞轮 SFT ──► RLVR (TRLOO)
 | 模型 | fast@1.2（逐题历史最优） | 备注 |
 |---|---|---|
 | **King.triton-kernel（14B，本项目）** | **61.0% ± 6.2pp**（n=3） | 主打数字 |
-| SFT v2（从 RL 修复飞轮蒸馏，约 10 分钟 LoRA） | 65.0% ± 6.2pp（n=3） | 与 RL 基线统计上不可区分，训练成本约 1%；其中一次运行达 72%，发布后待复验 |
+| SFT v2（从 RL 修复飞轮蒸馏，约 10 分钟 LoRA） | 68.3% ± 6.2pp（n=3） | 与 RL 基线统计上不可区分，训练成本约 1%；其中一次运行达 72%，发布后待复验 |
 | Dr.Kernel-14B | 47.8%（最优轮次口径，STTS†） | arXiv 2602.05885，采样预算未披露 |
 | daVinci-14B | 27.1%（L2 Fast@1.2，最优轮次口径） | arXiv 2606.16497 |
 
@@ -133,14 +133,13 @@ python3 smoke_test.py http://localhost:10907
 | `kernelgym-worker-monitor` | worker 监控 |
 | `kernelgym-single-worker` | 单 worker 模式（调试用） |
 
-> 训练栈（`drkernel/` 的 verl 集成）依赖上游 [verl](https://github.com/verl-project/verl)，未随本仓库发布，需自行安装并对齐版本；评估环境 `kernelgym/` 无此依赖。
+> 本仓库仅发布评估环境与口径工具。RL 训练栈（verl 集成）不在本仓库内，它消费本仓库产生的判分结果；`kernelgym/` 评估环境无 verl/ray/vllm 依赖。
 
 ## 仓库结构与分层边界
 
 ```
 King.triton-kernel/
 ├── kernelgym/   # GPU 分布式评估环境（核心库 + server + worker）
-├── drkernel/    # RL 奖励实现与提示词工具（verl 集成，依赖上游）
 ├── evals/       # 评测口径与聚合（agg_eval.py / compare_gs_eval.py / repro_pass_at_k.py）
 ├── docs/        # ARCHITECTURE.md（架构与口径）/ ROADMAP.md
 ├── tests/       # 166 个测试函数（CI 跑 CPU 纯逻辑子集）
@@ -154,7 +153,6 @@ King.triton-kernel/
 |---|---|---|---|
 | 评估核心库 | `kernelgym/core|schema|workflow|backend|toolkit|worker/` | torch / triton / numpy | 是 |
 | 判分服务 | `kernelgym/server|config|utils/` | fastapi / redis | 是 |
-| 训练侧 | `drkernel/` | verl / ray / vllm | 部分（需自行安装 verl） |
 | 评测聚合 | `evals/` | pandas / pyarrow | 是 |
 
 分层铁律：`kernelgym/` 保持零 verl/ray/vllm 依赖，评估环境必须可独立复用；训练侧不内嵌评测逻辑，只读取 server 返回的判定结果。

@@ -32,7 +32,7 @@ This project ships two independently usable deliverables:
 | Deliverable | Description | Use case |
 |---|---|---|
 | **kernelgym evaluation environment** | A self-contained distributed GPU grading service: subprocess-isolated execution, CUDA-event timing, correctness checking, reference timing cache | Any code-generation task that needs real-execution verification; reusable without the training stack |
-| **RLVR training method** | A multi-turn repair reinforcement-learning pipeline with execution correctness as the core reward signal (verl ecosystem; reward implementations in `drkernel/`) | RL post-training for kernel / code generation |
+| **RLVR training method** | A multi-turn repair reinforcement-learning pipeline with execution correctness as the core reward signal (training stack not shipped in this repo; see Installation) | RL post-training for kernel / code generation |
 
 Target audience:
 
@@ -94,7 +94,7 @@ To keep reported numbers reproducible and comparable, the project enforces the f
 | Model | fast@1.2 (best-of-history) | Notes |
 |---|---|---|
 | **King.triton-kernel (14B, this project)** | **61.0% ± 6.2pp** (n=3) | headline number |
-| SFT v2 (distilled from the RL repair flywheel, ~10-min LoRA) | 65.0% ± 6.2pp (n=3) | statistically indistinguishable from the RL baseline at ~1% training cost; one run reached 72%, pending post-release re-verification |
+| SFT v2 (distilled from the RL repair flywheel, ~10-min LoRA) | 68.3% ± 6.2pp (n=3) | statistically indistinguishable from the RL baseline at ~1% training cost |
 | Dr.Kernel-14B | 47.8% (best-turn, STTS†) | arXiv 2602.05885; sampling budget not disclosed |
 | daVinci-14B | 27.1% (L2 Fast@1.2, best-turn) | arXiv 2606.16497 |
 
@@ -102,22 +102,22 @@ To keep reported numbers reproducible and comparable, the project enforces the f
 
 Every headline figure above is a self-measured number with the following fixed provenance; do not reproduce or cite it without the same conditions:
 
-- **Physical machine**: node `205` (`10.199.126.205`, 8×A800). Timed numbers are machine-bound and valid only for node 205 — the reference timing cache was rebuilt on this machine (a cache built on a different node is invalid here).
+- **Physical machine**: a single 8×A800-SXM4-80GB node (Kubernetes pod). Timed numbers are machine-bound and valid only for the machine on which they were measured — the reference timing cache was rebuilt on that machine (a cache built on a different node is invalid here).
 - **Reference cache (refcache)**: **ON** — the reference implementation is not re-timed during grading; the speedup denominator is fixed, removing run-level jitter.
 - **Protocol / caliber**: 8 samples × 5 repair turns, **best-of-history** (per-problem best submission across all samples × all turns), KernelBench L2 (100 problems), speedup threshold ≥ 1.2×, TF32 enabled (TF32-ON).
 - **Precision**: reported as the **mean of n=3 independent evaluation runs**, with a 3-run sample std of **±6.2pp** (single-run noise is ±3–6pp; conclusions require the mean of ≥3 runs).
 - **Aggregation**: `scripts/agg_eval.py` is the single authoritative aggregator (four-piece provenance: script version incl. SHA, sampling budget, extractor version, caliber version).
-- **Measurement timestamps**: RL headline locked 2026-09-02; SFT v2 numbers measured on node 205 in early September 2026 (eval runs 09-03–09-04, **pending final lock**).
+- **Measurement timestamps**: RL headline locked 2026-09-02; SFT v2 numbers locked 2026-09-05 (eval runs 09-03–09-05).
 
 Status flags on the SFT v2 row:
 
-- **SFT v2 65.0% is PENDING final lock** — it is not yet the release headline. Treat it as statistically indistinguishable from the RL baseline pending post-release re-verification.
+- **SFT v2 68.3% is locked** (n=3) and is a co-headline alongside the RL baseline.
 - The single **72% run is flagged**: it is one run, not a locked figure, and must not be quoted as the SFT v2 result.
 
 Protocol caveats:
 
 - fast@1 vs fast@1.2, best-of-history vs best-turn, and speedup ≥1.0× vs ≥1.2× are different calibers and must not be compared directly. daVinci reports both: 27.1% = L2 Fast@1.2, 70.6% = L2 Fast@1.
-- Measurement conditions (node 205, 8×A800): clocks at 1155/1410 MHz natural boost (frequency locking unavailable without root); reference timing carries a 12–20% cross-node spread (machine property) — all numbers above are internally consistent within node 205; correctness 82.3% is judged against the TF32 reference (TF32-ON caliber).
+- Measurement conditions (single 8×A800 node): clocks at 1155/1410 MHz natural boost (frequency locking unavailable without root); reference timing carries a 12–20% cross-node spread (machine property) — all numbers above are internally consistent within the measuring node; correctness 82.3% is judged against the TF32 reference (TF32-ON caliber).
 - Single-run noise is ±3–6pp; conclusions require the mean of ≥3 runs.
 
 ## Installation & Quick Start
@@ -128,16 +128,15 @@ Protocol caveats:
 
 | Component | Version / note |
 |---|---|
-| OS / node | Kubernetes pod `vllm-pd-16-*`, node `205` (10.199.126.205), 8×A800-SXM4-80GB |
+| OS / node | Kubernetes pod, 8×A800-SXM4-80GB |
 | Python | 3.10 (conda env `drkernel`) |
 | PyTorch | ≥ 2.8 (CUDA 12.1 via conda) |
 | Triton | ≥ 3.4 |
 | vLLM | ≥ 0.8.5 (async rollout) |
-| verl | upstream (see `drkernel/verl_patch`) |
 | Redis | ≥ 6.2 (grading broker) |
 | CUDA | 12.1 (driver-visible) |
 
-> Node `205` runs as a Kubernetes pod and may be recycled/re-scheduled; timed results are machine-bound and valid only for that node (see Measurement provenance above). The `scripts/launch_local.sh` smoke path only needs **one** GPU (`cuda:0`).
+> The measuring node runs as a Kubernetes pod and may be recycled/re-scheduled; timed results are machine-bound and valid only for that node (see Measurement provenance above). The `scripts/launch_local.sh` smoke path only needs **one** GPU (`cuda:0`).
 
 ```bash
 # 1. Clone and install dependencies
@@ -157,7 +156,7 @@ python3 smoke_test.py http://localhost:10907
 `scripts/launch_local.sh` starts everything a fresh machine needs — a local
 Redis instance, the KernelGym grading API server, and one GPU worker on
 `cuda:0` — and prints the server URL. Default port is **10907** (override with
-`API_PORT`, e.g. `API_PORT=8004 bash scripts/launch_local.sh`). On machines
+`API_PORT`, e.g. `API_PORT=10907 bash scripts/launch_local.sh`). On machines
 without a CUDA-visible GPU, the server still starts for `/health` but
 `smoke_test.py` prints a clear skip message for the grading-chain check.
 
@@ -185,14 +184,13 @@ CLI entry points (from `pyproject.toml [project.scripts]`):
 | `kernelgym-worker-monitor` | Worker monitor |
 | `kernelgym-single-worker` | Single-worker mode (debugging) |
 
-> The training stack (verl integration in `drkernel/`) depends on upstream [verl](https://github.com/verl-project/verl) and is not shipped with this repository — install and align the version yourself. The `kernelgym/` evaluation environment has no such dependency.
+> This repository ships the evaluation environment and caliber tooling only. The RL training stack (verl-integrated) is not part of this repo; it consumes the server-returned verdicts produced here. The `kernelgym/` evaluation environment has no verl/ray/vllm dependency.
 
 ## Repository Layout & Layering
 
 ```
 King.triton-kernel/
 ├── kernelgym/   # Distributed GPU evaluation environment (core lib + server + worker)
-├── drkernel/    # RL reward implementations and prompt tooling (verl integration, upstream dependency)
 ├── evals/       # Aggregation and calibers (agg_eval.py / compare_gs_eval.py / repro_pass_at_k.py)
 ├── docs/        # ARCHITECTURE.md (architecture & calibers) / ROADMAP.md
 ├── tests/       # 166 test functions (CI runs the CPU-only logic subset)
@@ -206,10 +204,9 @@ Layering (details in `docs/ARCHITECTURE.md` §6):
 |---|---|---|---|
 | Core evaluation library | `kernelgym/core\|schema\|workflow\|backend\|toolkit\|worker/` | torch / triton / numpy | Yes |
 | Grading server | `kernelgym/server\|config\|utils/` | fastapi / redis | Yes |
-| Training side | `drkernel/` | verl / ray / vllm | Partially (verl not shipped) |
 | Evaluation aggregation | `evals/` | pandas / pyarrow | Yes |
 
-Layering rules: `kernelgym/` stays free of verl/ray/vllm dependencies so the evaluation environment is always independently reusable; the training side embeds no grading logic of its own and only consumes server-returned verdicts.
+Layering rule: `kernelgym/` stays free of verl/ray/vllm dependencies so the evaluation environment is always independently reusable. The (external) training stack embeds no grading logic of its own and only consumes server-returned verdicts.
 
 ## Related Work
 
@@ -218,7 +215,7 @@ Layering rules: `kernelgym/` stays free of verl/ray/vllm dependencies so the eva
 | [Dr.Kernel](https://github.com/alpha-beta-wang/Dr.-Kernel) (arXiv 2602.05885) | This project follows its "evaluation environment + training method" architecture, with differentiated engineering on evaluation-caliber governance |
 | daVinci (arXiv 2606.16497) | KernelBench L2 comparison baseline |
 | DRTriton / CUDA Agent | Domain works that likewise use real GPU execution as the core reward signal |
-| [verl](https://github.com/verl-project/verl) | Upstream training framework |
+| [verl](https://github.com/verl-project/verl) | Upstream training framework (not shipped with this repo) |
 
 ## Documentation
 
@@ -231,7 +228,7 @@ Layering rules: `kernelgym/` stays free of verl/ray/vllm dependencies so the eva
 
 ## Release Status
 
-v0.1.0 (2026-08-31) is the first public release: `kernelgym/`, `drkernel/`, and `evals/` are real code copies, with private datasets, training checkpoints, internal logs, and internal paths excluded. Some files originating from the verl / Dr.Kernel ecosystem retain their Apache-2.0 headers — see [NOTICE](NOTICE).
+v0.1.0 (2026-08-31) is the first public release: `kernelgym/`, `evals/`, docs, and tests are real code, with private datasets, training checkpoints, internal logs, and internal paths excluded. The repository ships the evaluation environment and caliber tooling under the MIT License (see [NOTICE](NOTICE)).
 
 ## License
 

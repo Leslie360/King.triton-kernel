@@ -25,7 +25,6 @@ SKILL injection ──► repair-flywheel SFT ──► RLVR (TRLOO)
 ```
 King.triton-kernel/
 ├── kernelgym/   # standalone GPU evaluation environment (subprocess workers / timing / correctness / multi-backend)
-├── drkernel/    # training side (reward implementations + code extraction tooling; verl integration)
 ├── evals/       # aggregation & calibers (agg_eval.py / compare_gs_eval.py / repro_pass_at_k.py)
 ├── docs/        # architecture / calibers / release / roadmap
 ├── pyproject.toml   # packaging: kernelgym-server / worker / worker-monitor / single-worker entry points
@@ -35,10 +34,10 @@ King.triton-kernel/
 
 ### 1.1 Standalone-copy principle
 
-`kernelgym/` and `drkernel/` are **real code copies** (not symlinks, not shared-disk references, no .git history),
-directly reusable by external projects. Private datasets, training checkpoints, internal logs, and the verl_patch
-internal overlay are excluded. The training stack (`main_grading.py` / verl integration) depends on upstream
-[verl] and is not shipped with this repository; install and align the version yourself.
+`kernelgym/` is a **real code copy** (not a symlink, not a shared-disk reference, no .git history),
+directly reusable by external projects. Private datasets, training checkpoints, and internal logs are excluded.
+This repository ships the evaluation environment and caliber tooling only; the RL training stack (verl-integrated)
+is not part of the repo and is installed separately by the user.
 
 ---
 
@@ -158,7 +157,7 @@ End-to-end path of one full eval request (KernelBench workflow example):
         │
         ▼
 8. _persist_result() writes to disk (eval_results_path)
-   └─ reward is computed by the training side (drkernel) or agg_eval from speedup
+   └─ reward is computed by the (external) training side or agg_eval from speedup
 ```
 
 ### 3.1 Reward computation (consistent on training and evaluation sides)
