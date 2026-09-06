@@ -13,17 +13,15 @@ Date: 2025-10-30
 Version: v0.3.3-rc
 """
 
-import os
-import sys
-import time
+import asyncio
 import logging
-import traceback
 import multiprocessing as mp
 import queue
-import asyncio
-from typing import Dict, Any, Optional, List
+import sys
+import time
+import traceback
 from dataclasses import dataclass
-from datetime import datetime
+from typing import Any
 
 logger = logging.getLogger("kernelgym.subprocess_pool")
 
@@ -42,8 +40,9 @@ def _aggressive_gpu_cleanup(device_id: int):
     Args:
         device_id: GPU device id.
     """
-    import torch
     import gc
+
+    import torch
 
     # 1. Synchronize all CUDA operations
     try:
@@ -75,7 +74,7 @@ def _aggressive_gpu_cleanup(device_id: int):
 
     # 6. Clear Triton's cache (if Triton is used)
     try:
-        import triton
+        import triton  # noqa: F401 -- probe only: confirms Triton is importable in this process
         # Triton-compiled kernel cache may linger.
         # NOTE: Triton has no public cleanup API, but the cache is freed
         # automatically when the process exits.
@@ -92,10 +91,11 @@ def _aggressive_gpu_cleanup(device_id: int):
 @dataclass
 class WorkerMetrics:
     """Worker execution metrics."""
-    task_execution_time: float    # task execution time
-    total_time: float              # total time (including queue wait)
+
+    task_execution_time: float  # task execution time
+    total_time: float  # total time (including queue wait)
     success: bool = True
-    error_type: Optional[str] = None
+    error_type: str | None = None
 
 
 class PersistentWorker:
@@ -109,7 +109,9 @@ class PersistentWorker:
     - The main process detects the exit and respawns a new worker
     """
 
-    def __init__(self, worker_id: str, device_id: int, pool_size_info: str = "", max_tasks_per_worker: int = 100):
+    def __init__(
+        self, worker_id: str, device_id: int, pool_size_info: str = "", max_tasks_per_worker: int = 100
+    ):
         """
         Args:
             worker_id: Worker identifier (e.g. "worker_0").
@@ -121,10 +123,10 @@ class PersistentWorker:
         self.device_id = device_id
         self.pool_size_info = pool_size_info
         self.max_tasks_per_worker = max_tasks_per_worker
-        self.process: Optional[mp.Process] = None
+        self.process: mp.Process | None = None
 
         # Use spawn context to ensure full isolation
-        self.ctx = mp.get_context('spawn')
+        self.ctx = mp.get_context("spawn")
         self.task_queue = self.ctx.Queue(maxsize=10)  # bound queue size to avoid memory blowups
         self.result_queue = self.ctx.Queue(maxsize=10)
 
@@ -138,19 +140,13 @@ class PersistentWorker:
     def _start_worker(self):
         """Start the worker process."""
         logger.info(
-            f"[{self.worker_id}] Starting persistent worker for GPU {self.device_id} "
-            f"{self.pool_size_info}"
+            f"[{self.worker_id}] Starting persistent worker for GPU {self.device_id} {self.pool_size_info}"
         )
 
         self.process = self.ctx.Process(
             target=_persistent_worker_loop,
-            args=(
-                self.worker_id,
-                self.device_id,
-                self.task_queue,
-                self.result_queue
-            ),
-            daemon=False  # not a daemon: ensure clean shutdown
+            args=(self.worker_id, self.device_id, self.task_queue, self.result_queue),
+            daemon=False,  # not a daemon: ensure clean shutdown
         )
 
         self.process.start()
@@ -169,11 +165,9 @@ class PersistentWorker:
         except queue.Empty:
             self.process.terminate()
             self.process.join(timeout=5)
-            raise RuntimeError(
-                f"[{self.worker_id}] Worker initialization timeout (>120s)"
-            )
+            raise RuntimeError(f"[{self.worker_id}] Worker initialization timeout (>120s)") from None
 
-    def execute_task(self, task_data: Dict[str, Any], timeout: int = 60) -> Dict[str, Any]:
+    def execute_task(self, task_data: dict[str, Any], timeout: int = 60) -> dict[str, Any]:
         """
         Execute a task.
 
@@ -191,18 +185,15 @@ class PersistentWorker:
         if not self.is_alive():
             raise RuntimeError(f"[{self.worker_id}] Worker is not alive")
 
-        start_time = time.time()
-
         # Send the task
         try:
             self.task_queue.put(task_data, timeout=5)
         except queue.Full:
-            raise RuntimeError(f"[{self.worker_id}] Task queue is full")
+            raise RuntimeError(f"[{self.worker_id}] Task queue is full") from None
 
         # Wait for the result
         try:
             result = self.result_queue.get(timeout=timeout)
-            exec_time = time.time() - start_time
 
             # Check whether the worker reported a CUDA error and is about to exit
             if result.get("worker_exiting") is True:
@@ -237,17 +228,12 @@ class PersistentWorker:
             # Mark worker as unavailable (possibly stuck)
             self.is_alive_flag = False
             raise TimeoutError(
-                f"[{self.worker_id}] Task {task_data.get('task_id', 'unknown')} "
-                f"timeout after {timeout}s"
-            )
+                f"[{self.worker_id}] Task {task_data.get('task_id', 'unknown')} timeout after {timeout}s"
+            ) from None
 
     def is_alive(self) -> bool:
         """Check whether the worker is alive."""
-        return (
-            self.is_alive_flag and
-            self.process is not None and
-            self.process.is_alive()
-        )
+        return self.is_alive_flag and self.process is not None and self.process.is_alive()
 
     def shutdown(self, timeout: int = 10):
         """Shut down the worker process."""
@@ -296,7 +282,7 @@ class PersistentWorker:
             f"{time.time() - self.start_time:.1f}s)"
         )
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """Get worker stats."""
         return {
             "worker_id": self.worker_id,
@@ -304,7 +290,7 @@ class PersistentWorker:
             "is_alive": self.is_alive(),
             "tasks_processed": self.tasks_processed,
             "uptime": time.time() - self.start_time,
-            "pid": self.process.pid if self.process else None
+            "pid": self.process.pid if self.process else None,
         }
 
 
@@ -319,7 +305,13 @@ class SubprocessWorkerPool:
     4. Load balancing
     """
 
-    def __init__(self, device_id: int, pool_size: int = 2, worker_prefix: str = "pool_worker", max_tasks_per_worker: int = 100):
+    def __init__(
+        self,
+        device_id: int,
+        pool_size: int = 2,
+        worker_prefix: str = "pool_worker",
+        max_tasks_per_worker: int = 100,
+    ):
         """
         Args:
             device_id: GPU device id.
@@ -333,9 +325,9 @@ class SubprocessWorkerPool:
         self.max_tasks_per_worker = max_tasks_per_worker
 
         # Workers list
-        self.workers: List[PersistentWorker] = []
-        self.idle_workers: List[PersistentWorker] = []
-        self.busy_workers: List[PersistentWorker] = []
+        self.workers: list[PersistentWorker] = []
+        self.idle_workers: list[PersistentWorker] = []
+        self.busy_workers: list[PersistentWorker] = []
 
         # Stats
         self.total_tasks_processed = 0
@@ -348,9 +340,7 @@ class SubprocessWorkerPool:
         # Initialize workers
         self._init_workers()
 
-        logger.info(
-            f"[GPU {device_id}] Worker pool initialized with {pool_size} workers"
-        )
+        logger.info(f"[GPU {device_id}] Worker pool initialized with {pool_size} workers")
 
     def _init_workers(self):
         """Initialize all workers."""
@@ -360,30 +350,20 @@ class SubprocessWorkerPool:
             worker_id = f"{self.worker_prefix}_{self.device_id}_{i}"
             try:
                 worker = PersistentWorker(
-                    worker_id,
-                    self.device_id,
-                    pool_info,
-                    max_tasks_per_worker=self.max_tasks_per_worker
+                    worker_id, self.device_id, pool_info, max_tasks_per_worker=self.max_tasks_per_worker
                 )
                 self.workers.append(worker)
                 self.idle_workers.append(worker)
             except Exception as e:
-                logger.error(
-                    f"[GPU {self.device_id}] Failed to start worker {worker_id}: {e}"
-                )
+                logger.error(f"[GPU {self.device_id}] Failed to start worker {worker_id}: {e}")
                 # If startup fails, keep trying to start the others.
                 # At least one worker must come up.
                 if len(self.workers) == 0 and i == self.pool_size - 1:
-                    raise RuntimeError(
-                        f"[GPU {self.device_id}] Failed to start any worker in pool"
-                    )
+                    raise RuntimeError(f"[GPU {self.device_id}] Failed to start any worker in pool") from e
 
     async def execute_task(
-        self,
-        task_data: Dict[str, Any],
-        timeout: int = 60,
-        max_retries: int = 2
-    ) -> Dict[str, Any]:
+        self, task_data: dict[str, Any], timeout: int = 60, max_retries: int = 2
+    ) -> dict[str, Any]:
         """
         Execute a task (auto-selects an idle worker).
 
@@ -413,30 +393,21 @@ class SubprocessWorkerPool:
             try:
                 # Run the task in the thread pool so asyncio is not blocked
                 loop = asyncio.get_event_loop()
-                result = await loop.run_in_executor(
-                    None,
-                    worker.execute_task,
-                    task_data,
-                    timeout
-                )
+                result = await loop.run_in_executor(None, worker.execute_task, task_data, timeout)
 
                 # Task done
                 self.total_tasks_processed += 1
 
                 # Check whether the worker needs to be restarted
                 if not worker.is_alive():
-                    logger.warning(
-                        f"[{worker.worker_id}] Worker needs restart after task"
-                    )
+                    logger.warning(f"[{worker.worker_id}] Worker needs restart after task")
                     await self._restart_worker(worker)
 
                 return result
 
             except (RuntimeError, TimeoutError) as e:
                 # The worker may be dead or may have timed out
-                logger.error(
-                    f"[{worker.worker_id}] Task execution failed: {e}"
-                )
+                logger.error(f"[{worker.worker_id}] Task execution failed: {e}")
                 last_error = e
 
                 # Check whether this is a timeout error
@@ -476,11 +447,10 @@ class SubprocessWorkerPool:
             )
         else:
             raise RuntimeError(
-                f"[GPU {self.device_id}] Task failed after {max_retries} retries. "
-                f"Last error: {last_error}"
+                f"[GPU {self.device_id}] Task failed after {max_retries} retries. Last error: {last_error}"
             )
 
-    async def _get_idle_worker(self, timeout: int = 60) -> Optional[PersistentWorker]:
+    async def _get_idle_worker(self, timeout: int = 60) -> PersistentWorker | None:
         """
         Acquire an idle worker.
 
@@ -505,18 +475,14 @@ class SubprocessWorkerPool:
                         emergency_worker = PersistentWorker(
                             f"worker_gpu_{self.device_id}_pool_{self.device_id}_emergency",
                             self.device_id,
-                            f"(emergency recovery)",
-                            max_tasks_per_worker=self.max_tasks_per_worker
+                            "(emergency recovery)",
+                            max_tasks_per_worker=self.max_tasks_per_worker,
                         )
                         self.workers.append(emergency_worker)
                         self.idle_workers.append(emergency_worker)
-                        logger.info(
-                            f"[GPU {self.device_id}] Emergency worker created successfully"
-                        )
+                        logger.info(f"[GPU {self.device_id}] Emergency worker created successfully")
                     except Exception as e:
-                        logger.error(
-                            f"[GPU {self.device_id}] Emergency recovery failed: {e}"
-                        )
+                        logger.error(f"[GPU {self.device_id}] Emergency recovery failed: {e}")
 
                 if self.idle_workers:
                     worker = self.idle_workers.pop(0)
@@ -527,9 +493,7 @@ class SubprocessWorkerPool:
             await asyncio.sleep(0.1)
 
         # Timeout
-        logger.error(
-            f"[GPU {self.device_id}] No idle worker available after {timeout}s"
-        )
+        logger.error(f"[GPU {self.device_id}] No idle worker available after {timeout}s")
         return None
 
     async def _return_worker(self, worker: PersistentWorker):
@@ -554,10 +518,7 @@ class SubprocessWorkerPool:
         4. Adds it to the idle pool
         """
         async with self.lock:
-            logger.info(
-                f"[{worker.worker_id}] Restarting worker "
-                f"(processed {worker.tasks_processed} tasks)"
-            )
+            logger.info(f"[{worker.worker_id}] Restarting worker (processed {worker.tasks_processed} tasks)")
 
             # Shut down the old worker
             try:
@@ -584,7 +545,7 @@ class SubprocessWorkerPool:
                     worker.worker_id,
                     self.device_id,
                     f"(pool_size={self.pool_size}, max_tasks={self.max_tasks_per_worker}, restart)",
-                    max_tasks_per_worker=self.max_tasks_per_worker
+                    max_tasks_per_worker=self.max_tasks_per_worker,
                 )
 
                 self.workers.append(new_worker)
@@ -625,7 +586,7 @@ class SubprocessWorkerPool:
             f"{time.time() - self.pool_start_time:.1f}s)"
         )
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """Get pool stats."""
         return {
             "device_id": self.device_id,
@@ -636,7 +597,7 @@ class SubprocessWorkerPool:
             "total_tasks_processed": self.total_tasks_processed,
             "total_workers_restarted": self.total_workers_restarted,
             "uptime": time.time() - self.pool_start_time,
-            "workers": [w.get_stats() for w in self.workers]
+            "workers": [w.get_stats() for w in self.workers],
         }
 
 
@@ -644,12 +605,8 @@ class SubprocessWorkerPool:
 # Worker Loop (runs inside the subprocess)
 # ============================================================================
 
-def _persistent_worker_loop(
-    worker_id: str,
-    device_id: int,
-    task_queue: mp.Queue,
-    result_queue: mp.Queue
-):
+
+def _persistent_worker_loop(worker_id: str, device_id: int, task_queue: mp.Queue, result_queue: mp.Queue):
     """
     Main loop of the persistent worker.
 
@@ -669,6 +626,7 @@ def _persistent_worker_loop(
         # Import dependencies
         import torch
         import torch.cuda
+
         from kernelgym.backend import get_backend
         from kernelgym.toolkit import get_toolkit
 
@@ -681,22 +639,17 @@ def _persistent_worker_loop(
         _ = torch.zeros(1, device=device)
         torch.cuda.synchronize()
 
-        toolkit_cache: Dict[str, Any] = {}
-        backend_cache: Dict[str, Any] = {}
+        toolkit_cache: dict[str, Any] = {}
+        backend_cache: dict[str, Any] = {}
 
         init_time = time.time() - init_start
 
         # Notify the main process: init succeeded
-        result_queue.put({
-            "status": "READY",
-            "init_time": init_time,
-            "device": str(device)
-        })
+        result_queue.put({"status": "READY", "init_time": init_time, "device": str(device)})
 
         # Log
         logger.info(
-            "[%s] Initialized successfully (device=%s, init_time=%.2fs)",
-            worker_id, device, init_time
+            "[%s] Initialized successfully (device=%s, init_time=%.2fs)", worker_id, device, init_time
         )
 
         # ====================================================================
@@ -716,7 +669,6 @@ def _persistent_worker_loop(
                     break
 
                 # Execute the task
-                task_start = time.time()
                 result = _execute_task_in_worker(
                     task_data,
                     device,
@@ -725,8 +677,6 @@ def _persistent_worker_loop(
                     get_toolkit,
                     get_backend,
                 )
-                task_time = time.time() - task_start
-
                 # Return the result
                 result_queue.put(result)
 
@@ -746,31 +696,34 @@ def _persistent_worker_loop(
 
                 # **Critical: check whether it's a CUDA error**
                 is_cuda_error = (
-                    "CUDA" in error_type or
-                    "CUDA" in error_message or
-                    "cuda" in error_message.lower() or
-                    error_type in ["RuntimeError", "CudaError"]
+                    "CUDA" in error_type
+                    or "CUDA" in error_message
+                    or "cuda" in error_message.lower()
+                    or error_type in ["RuntimeError", "CudaError"]
                 )
                 is_profiler_error = "PROFILER_NO_CUDA_EVENTS" in error_message
 
                 if is_cuda_error or is_profiler_error:
                     # CUDA error / profiler dropout! Prepare to exit
                     logger.error(
-                        "[%s] CUDA/profiler error detected! Worker will exit. "
-                        "Error: %s: %s",
-                        worker_id, error_type, error_message,
+                        "[%s] CUDA/profiler error detected! Worker will exit. Error: %s: %s",
+                        worker_id,
+                        error_type,
+                        error_message,
                     )
 
                     # Return an error result and mark the worker as exiting
-                    result_queue.put({
-                        "success": False,
-                        "error_type": error_type,
-                        "error_message": error_message,
-                        "traceback": traceback.format_exc(),
-                        "worker_exiting": True,  # critical flag!
-                        "cuda_error": is_cuda_error,
-                        "profiling_error": is_profiler_error
-                    })
+                    result_queue.put(
+                        {
+                            "success": False,
+                            "error_type": error_type,
+                            "error_message": error_message,
+                            "traceback": traceback.format_exc(),
+                            "worker_exiting": True,  # critical flag!
+                            "cuda_error": is_cuda_error,
+                            "profiling_error": is_profiler_error,
+                        }
+                    )
 
                     # **Critical: force-clean VRAM before exiting on CUDA error**
                     logger.warning("[%s] Performing aggressive GPU cleanup before exit...", worker_id)
@@ -780,14 +733,15 @@ def _persistent_worker_loop(
                     except Exception as cleanup_err:
                         logger.error(
                             "[%s] GPU cleanup failed (expected after CUDA error): %s",
-                            worker_id, cleanup_err,
+                            worker_id,
+                            cleanup_err,
                         )
 
                     # Try a final sync (may fail, but try)
                     try:
                         torch.cuda.synchronize()
                         logger.info("[%s] Final CUDA sync before exit", worker_id)
-                    except:
+                    except Exception:
                         pass
 
                     # Exit the loop immediately
@@ -797,22 +751,27 @@ def _persistent_worker_loop(
                     # Non-CUDA error: return error but keep running
                     logger.warning(
                         "[%s] Task error (non-CUDA): %s: %s",
-                        worker_id, error_type, error_message,
+                        worker_id,
+                        error_type,
+                        error_message,
                     )
 
-                    result_queue.put({
-                        "success": False,
-                        "error_type": error_type,
-                        "error_message": error_message,
-                        "traceback": traceback.format_exc(),
-                        "worker_exiting": False,
-                        "cuda_error": False
-                    })
+                    result_queue.put(
+                        {
+                            "success": False,
+                            "error_type": error_type,
+                            "error_message": error_message,
+                            "traceback": traceback.format_exc(),
+                            "worker_exiting": False,
+                            "cuda_error": False,
+                        }
+                    )
 
         # Normal exit — clean VRAM
         logger.info(
             "[%s] Worker exiting normally (processed %s tasks)",
-            worker_id, tasks_processed,
+            worker_id,
+            tasks_processed,
         )
 
         # **Critical: clean VRAM on normal exit too**
@@ -826,6 +785,7 @@ def _persistent_worker_loop(
         # **Additionally: try resetting the CUDA context (fully release on exit)**
         try:
             import torch
+
             # This auto-runs CUDA cleanup on process exit, but we call it
             # explicitly to be sure.
             torch.cuda.synchronize()
@@ -837,25 +797,24 @@ def _persistent_worker_loop(
         # Initialization failed
         logger.error(
             "[%s] Initialization failed: %s",
-            worker_id, init_error,
+            worker_id,
+            init_error,
         )
         traceback.print_exc(file=sys.stderr)
 
-        result_queue.put({
-            "status": "INIT_FAILED",
-            "error": str(init_error),
-            "traceback": traceback.format_exc()
-        })
+        result_queue.put(
+            {"status": "INIT_FAILED", "error": str(init_error), "traceback": traceback.format_exc()}
+        )
 
 
 def _execute_task_in_worker(
-    task_data: Dict[str, Any],
+    task_data: dict[str, Any],
     device: Any,  # torch.device
-    toolkit_cache: Dict[str, Any],
-    backend_cache: Dict[str, Any],
+    toolkit_cache: dict[str, Any],
+    backend_cache: dict[str, Any],
     get_toolkit: Any,
     get_backend: Any,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Execute a single task inside the worker.
 
@@ -867,6 +826,7 @@ def _execute_task_in_worker(
     Returns:
         Result dict.
     """
+
     def _has_no_cuda_events(result_obj: Any) -> bool:
         """Detect profiler dropouts where no CUDA events were captured."""
         try:
@@ -928,6 +888,6 @@ def _execute_task_in_worker(
             "worker_exiting": False,
         }
 
-    except Exception as e:
+    except Exception:
         # The exception here is caught by the caller and classified as CUDA vs non-CUDA.
         raise

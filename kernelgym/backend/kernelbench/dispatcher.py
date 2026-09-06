@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any
 
 from kernelgym.backend.base import Backend
 
@@ -32,7 +32,7 @@ class KernelBenchBackend(Backend):
             return self._triton
         return self._cuda
 
-    def compile(self, code: str, **kwargs: Any) -> Dict[str, Any]:
+    def compile(self, code: str, **kwargs: Any) -> dict[str, Any]:
         backend_name = kwargs.get("backend", "triton")
         backend = self._select(backend_name)
         artifact = backend.compile(code, **kwargs)
@@ -40,7 +40,7 @@ class KernelBenchBackend(Backend):
             artifact.setdefault("backend", self._resolve_backend_name(backend_name))
         return artifact
 
-    def load(self, artifact: Dict[str, Any], **kwargs: Any) -> Any:
+    def load(self, artifact: dict[str, Any], **kwargs: Any) -> Any:
         backend_name = artifact.get("backend") if isinstance(artifact, dict) else None
         if backend_name is None:
             backend_name = kwargs.get("backend", "triton")
@@ -55,7 +55,7 @@ class KernelBenchBackend(Backend):
         backend = self._select(backend_name or kwargs.get("backend"))
         return backend.create_model(handle, init_inputs, **kwargs)
 
-    def run(self, handle: Any, inputs: Dict[str, Any], **kwargs: Any) -> Dict[str, Any]:
+    def run(self, handle: Any, inputs: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
         backend_name = handle.get("backend") if isinstance(handle, dict) else None
         backend = self._select(backend_name or kwargs.get("backend"))
         return backend.run(handle, inputs, **kwargs)

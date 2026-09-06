@@ -1,7 +1,9 @@
-import torch
-import time
 import threading
-from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Union
+from collections.abc import Callable
+from typing import Any
+
+import torch
+
 
 def _call_inference_no_grad(run: Callable, *args, **kwargs):
     # Avoid gradient / Autocast interfering with detection
@@ -21,20 +23,25 @@ def _call_inference(run: Callable, *args, **kwargs):
     """Backward-compatible: defaults to the no-grad behavior."""
     return _call_inference_no_grad(run, *args, **kwargs)
 
+
 def _resolve_triton_jitfunction():
     """Try to resolve Triton's JITFunction type; returns None on failure."""
     try:
         from triton.runtime.jit import JITFunction  # type: ignore
+
         return JITFunction
     except Exception:
         return None
 
+
 def _resolve_triton_autotunedkernel():
     try:
         from triton.runtime.autotuner import AutotunedKernel  # type: ignore
+
         return AutotunedKernel
     except Exception:
         return None
+
 
 def _resolve_triton_autotuner():
     """Try to resolve Triton's Autotuner class for objects wrapped by the
@@ -52,6 +59,7 @@ def _resolve_triton_autotuner():
             continue
     return None
 
+
 def _resolve_triton_cudakernel():
     # The path varies across versions; try as many as we can.
     for mod_path, name in [
@@ -67,6 +75,7 @@ def _resolve_triton_cudakernel():
             continue
     return None
 
+
 def _resolve_triton_backend_kernels(candidates):
     """Resolve multiple backend kernel classes at once; return the list of found classes."""
     found = []
@@ -79,6 +88,7 @@ def _resolve_triton_backend_kernels(candidates):
         except Exception:
             continue
     return found
+
 
 def _get_kernel_name(obj: Any, _depth: int = 0) -> str:
     # Multi-strategy kernel-name resolution
@@ -124,9 +134,9 @@ class TritonKernelLaunchHook:
         self._HIPKernel_classes = []
         self._KernelInterface_classes = []
         self._Launcher_classes = []
-        self._orig_methods: List[Tuple[Any, str, Any]] = []
+        self._orig_methods: list[tuple[Any, str, Any]] = []
         self._lock = threading.Lock()
-        self.captured: List[str] = []
+        self.captured: list[str] = []
         self._enabled = False
 
     def _append_capture(self, name: str, grid: Any, fn_or_obj: Any):
@@ -148,7 +158,7 @@ class TritonKernelLaunchHook:
                 info_extra.append(f"module={module}")
             if filename:
                 info_extra.append(f"file={filename}")
-            extra = (" "+" ".join(info_extra)) if info_extra else ""
+            extra = (" " + " ".join(info_extra)) if info_extra else ""
             with self._lock:
                 self.captured.append(f"{name} grid={grid}{extra}")
         except Exception:
@@ -168,7 +178,7 @@ class TritonKernelLaunchHook:
             if getattr(orig, "_kb_patched", False):
                 return
             wrapped = wrapper_factory(orig)
-            setattr(wrapped, "_kb_patched", True)
+            wrapped._kb_patched = True
             setattr(cls, method_name, wrapped)
             self._orig_methods.append((cls, method_name, orig))
         except Exception:
@@ -186,7 +196,7 @@ class TritonKernelLaunchHook:
 
     def _wrap_call_with_grid(
         self,
-        name_obj_getter: Optional[Callable[[Any], Any]] = None,
+        name_obj_getter: Callable[[Any], Any] | None = None,
         grid_from_args: bool = False,
         grid_from_obj: bool = False,
     ):
@@ -204,21 +214,27 @@ class TritonKernelLaunchHook:
                 except Exception:
                     pass
                 return orig(obj, *args, **kwargs)
+
             return _patched
+
         return _factory
 
-    def _wrap_getitem(self, name_obj_getter: Optional[Callable[[Any], Any]] = None):
+    def _wrap_getitem(self, name_obj_getter: Callable[[Any], Any] | None = None):
         def _factory(orig):
             def _patched(obj, grid):
                 launcher = orig(obj, grid)
                 name_obj = name_obj_getter(obj) if name_obj_getter else obj
                 name = _get_kernel_name(name_obj)
+
                 def _wrapper(*a, **k):
                     self._append_capture(name, grid, name_obj)
                     return launcher(*a, **k)
-                setattr(_wrapper, "_kb_patched", True)
+
+                _wrapper._kb_patched = True
                 return _wrapper
+
             return _patched
+
         return _factory
 
     def __enter__(self):
@@ -227,26 +243,34 @@ class TritonKernelLaunchHook:
         self._Autotuner = _resolve_triton_autotuner()
         self._CUDAKernel = _resolve_triton_cudakernel()
         # Resolve multiple backend classes at once, for full coverage
-        self._CUDAKernel_classes = _resolve_triton_backend_kernels([
-            ("triton.runtime.driver", "CUDAKernel"),
-            ("triton.backends.nvidia.driver", "CUDAKernel"),
-            ("triton.backends.cuda.driver", "CUDAKernel"),
-            ("triton.runtime.code_cache", "CUDAKernel"),
-        ])
-        self._HIPKernel_classes = _resolve_triton_backend_kernels([
-            ("triton.backends.amd.driver", "HIPKernel"),
-            ("triton.backends.rocm.driver", "HIPKernel"),
-        ])
-        self._KernelInterface_classes = _resolve_triton_backend_kernels([
-            ("triton.runtime.jit", "KernelInterface"),
-            ("triton.runtime.jit", "Kernel"),
-            ("triton.runtime.jit", "CompiledKernel"),
-        ])
-        self._Launcher_classes = _resolve_triton_backend_kernels([
-            ("triton.runtime.launcher", "Launcher"),
-            ("triton.runtime.launcher", "KernelLauncher"),
-            ("triton.runtime.launcher", "KernelLauncherBase"),
-        ])
+        self._CUDAKernel_classes = _resolve_triton_backend_kernels(
+            [
+                ("triton.runtime.driver", "CUDAKernel"),
+                ("triton.backends.nvidia.driver", "CUDAKernel"),
+                ("triton.backends.cuda.driver", "CUDAKernel"),
+                ("triton.runtime.code_cache", "CUDAKernel"),
+            ]
+        )
+        self._HIPKernel_classes = _resolve_triton_backend_kernels(
+            [
+                ("triton.backends.amd.driver", "HIPKernel"),
+                ("triton.backends.rocm.driver", "HIPKernel"),
+            ]
+        )
+        self._KernelInterface_classes = _resolve_triton_backend_kernels(
+            [
+                ("triton.runtime.jit", "KernelInterface"),
+                ("triton.runtime.jit", "Kernel"),
+                ("triton.runtime.jit", "CompiledKernel"),
+            ]
+        )
+        self._Launcher_classes = _resolve_triton_backend_kernels(
+            [
+                ("triton.runtime.launcher", "Launcher"),
+                ("triton.runtime.launcher", "KernelLauncher"),
+                ("triton.runtime.launcher", "KernelLauncherBase"),
+            ]
+        )
 
         # 1) JITFunction path
         jf = self._JITFunction
@@ -260,11 +284,17 @@ class TritonKernelLaunchHook:
                         grid = args[0]
                     self._append_capture(name, grid, getattr(obj, "fn", obj))
                     return orig(obj, *args, **kwargs)
+
                 return _patched
+
             self._patch_method(jf, "launch", wrap_launch)
-            self._patch_method(jf, "run", self._wrap_call_with_grid(
-                name_obj_getter=lambda o: getattr(o, "fn", o),
-            ))
+            self._patch_method(
+                jf,
+                "run",
+                self._wrap_call_with_grid(
+                    name_obj_getter=lambda o: getattr(o, "fn", o),
+                ),
+            )
 
             # Direct call: kernel(..., grid=...)
             def wrap_call(orig):
@@ -273,7 +303,9 @@ class TritonKernelLaunchHook:
                     grid = kwargs.get("grid", None)
                     self._append_capture(name, grid, getattr(obj, "fn", obj))
                     return orig(obj, *args, **kwargs)
+
                 return _patched
+
             self._patch_method(jf, "__call__", wrap_call)
 
             # Subscript call: kernel[grid](...)
@@ -281,148 +313,227 @@ class TritonKernelLaunchHook:
                 def _patched(obj, grid):
                     launcher = orig(obj, grid)
                     name = _get_kernel_name(obj)
+
                     def _wrapper(*a, **k):
                         self._append_capture(name, grid, getattr(obj, "fn", obj))
                         return launcher(*a, **k)
-                    setattr(_wrapper, "_kb_patched", True)
+
+                    _wrapper._kb_patched = True
                     return _wrapper
+
                 return _patched
+
             self._patch_method(jf, "__getitem__", wrap_getitem)
 
         # 2) AutotunedKernel may be returned directly as a decorator
         ak = self._AutotunedKernel
         if ak is not None:
+
             def wrap_ak_call(orig):
                 def _patched(obj, *args, **kwargs):
                     name = _get_kernel_name(getattr(obj, "fn", obj))
                     grid = kwargs.get("grid", None)
                     self._append_capture(name, grid, getattr(obj, "fn", obj))
                     return orig(obj, *args, **kwargs)
+
                 return _patched
+
             self._patch_method(ak, "__call__", wrap_ak_call)
-            self._patch_method(ak, "run", self._wrap_call_with_grid(
-                name_obj_getter=lambda o: getattr(o, "fn", o),
-            ))
-            self._patch_method(ak, "launch", self._wrap_call_with_grid(
-                name_obj_getter=lambda o: getattr(o, "fn", o),
-                grid_from_args=True,
-            ))
+            self._patch_method(
+                ak,
+                "run",
+                self._wrap_call_with_grid(
+                    name_obj_getter=lambda o: getattr(o, "fn", o),
+                ),
+            )
+            self._patch_method(
+                ak,
+                "launch",
+                self._wrap_call_with_grid(
+                    name_obj_getter=lambda o: getattr(o, "fn", o),
+                    grid_from_args=True,
+                ),
+            )
 
             def wrap_ak_getitem(orig):
                 def _patched(obj, grid):
                     launcher = orig(obj, grid)
                     name = _get_kernel_name(getattr(obj, "fn", obj))
+
                     def _wrapper(*a, **k):
                         self._append_capture(name, grid, getattr(obj, "fn", obj))
                         return launcher(*a, **k)
-                    setattr(_wrapper, "_kb_patched", True)
+
+                    _wrapper._kb_patched = True
                     return _wrapper
+
                 return _patched
+
             self._patch_method(ak, "__getitem__", wrap_ak_getitem)
 
         # 2.5) Autotuner wrapper (newer @triton.autotune)
         at = self._Autotuner
         if at is not None:
+
             def wrap_at_call(orig):
                 def _patched(obj, *args, **kwargs):
                     name = _get_kernel_name(getattr(obj, "fn", obj))
                     grid = kwargs.get("grid", None)
                     self._append_capture(name, grid, getattr(obj, "fn", obj))
                     return orig(obj, *args, **kwargs)
+
                 return _patched
+
             self._patch_method(at, "__call__", wrap_at_call)
-            self._patch_method(at, "run", self._wrap_call_with_grid(
-                name_obj_getter=lambda o: getattr(o, "fn", o),
-            ))
-            self._patch_method(at, "launch", self._wrap_call_with_grid(
-                name_obj_getter=lambda o: getattr(o, "fn", o),
-                grid_from_args=True,
-            ))
+            self._patch_method(
+                at,
+                "run",
+                self._wrap_call_with_grid(
+                    name_obj_getter=lambda o: getattr(o, "fn", o),
+                ),
+            )
+            self._patch_method(
+                at,
+                "launch",
+                self._wrap_call_with_grid(
+                    name_obj_getter=lambda o: getattr(o, "fn", o),
+                    grid_from_args=True,
+                ),
+            )
 
             def wrap_at_getitem(orig):
                 def _patched(obj, grid):
                     launcher = orig(obj, grid)
                     name = _get_kernel_name(getattr(obj, "fn", obj))
+
                     def _wrapper(*a, **k):
                         self._append_capture(name, grid, getattr(obj, "fn", obj))
                         return launcher(*a, **k)
-                    setattr(_wrapper, "_kb_patched", True)
+
+                    _wrapper._kb_patched = True
                     return _wrapper
+
                 return _patched
+
             self._patch_method(at, "__getitem__", wrap_at_getitem)
 
         # 3) Low-level CUDAKernel (if present)
         ck = self._CUDAKernel
         if ck is not None:
+
             def wrap_ck_call(orig):
                 def _patched(obj, *args, **kwargs):
                     name = _get_kernel_name(obj)
                     grid = kwargs.get("grid", None)
                     self._append_capture(name, grid, obj)
                     return orig(obj, *args, **kwargs)
+
                 return _patched
+
             self._patch_method(ck, "__call__", wrap_ck_call)
             self._patch_method(ck, "run", self._wrap_call_with_grid())
-            self._patch_method(ck, "launch", self._wrap_call_with_grid(
-                grid_from_args=True,
-            ))
+            self._patch_method(
+                ck,
+                "launch",
+                self._wrap_call_with_grid(
+                    grid_from_args=True,
+                ),
+            )
 
         # 3.5) Multi-path CUDAKernel classes (best-effort full coverage)
         for ck_cls in self._CUDAKernel_classes:
+
             def wrap_ck_call_gen(orig):
                 def _patched(obj, *args, **kwargs):
                     name = _get_kernel_name(obj)
                     grid = kwargs.get("grid", None)
                     self._append_capture(name, grid, obj)
                     return orig(obj, *args, **kwargs)
+
                 return _patched
+
             self._patch_method(ck_cls, "__call__", wrap_ck_call_gen)
             self._patch_method(ck_cls, "run", self._wrap_call_with_grid())
-            self._patch_method(ck_cls, "launch", self._wrap_call_with_grid(
-                grid_from_args=True,
-            ))
+            self._patch_method(
+                ck_cls,
+                "launch",
+                self._wrap_call_with_grid(
+                    grid_from_args=True,
+                ),
+            )
 
         # 3.6) HIPKernel (AMD/ROCm backend)
         for hk_cls in self._HIPKernel_classes:
+
             def wrap_hk_call_gen(orig):
                 def _patched(obj, *args, **kwargs):
                     name = _get_kernel_name(obj)
                     grid = kwargs.get("grid", None)
                     self._append_capture(name, grid, obj)
                     return orig(obj, *args, **kwargs)
+
                 return _patched
+
             self._patch_method(hk_cls, "__call__", wrap_hk_call_gen)
             self._patch_method(hk_cls, "run", self._wrap_call_with_grid())
-            self._patch_method(hk_cls, "launch", self._wrap_call_with_grid(
-                grid_from_args=True,
-            ))
+            self._patch_method(
+                hk_cls,
+                "launch",
+                self._wrap_call_with_grid(
+                    grid_from_args=True,
+                ),
+            )
 
         # 4) KernelInterface/Kernel abstract classes (covers other kernel entry points)
         for ki_cls in self._KernelInterface_classes:
-            self._patch_method(ki_cls, "__call__", self._wrap_call_with_grid(
-                name_obj_getter=lambda o: getattr(o, "fn", o),
-            ))
-            self._patch_method(ki_cls, "run", self._wrap_call_with_grid(
-                name_obj_getter=lambda o: getattr(o, "fn", o),
-            ))
-            self._patch_method(ki_cls, "launch", self._wrap_call_with_grid(
-                name_obj_getter=lambda o: getattr(o, "fn", o),
-                grid_from_args=True,
-            ))
-            self._patch_method(ki_cls, "__getitem__", self._wrap_getitem(
-                name_obj_getter=lambda o: getattr(o, "fn", o),
-            ))
+            self._patch_method(
+                ki_cls,
+                "__call__",
+                self._wrap_call_with_grid(
+                    name_obj_getter=lambda o: getattr(o, "fn", o),
+                ),
+            )
+            self._patch_method(
+                ki_cls,
+                "run",
+                self._wrap_call_with_grid(
+                    name_obj_getter=lambda o: getattr(o, "fn", o),
+                ),
+            )
+            self._patch_method(
+                ki_cls,
+                "launch",
+                self._wrap_call_with_grid(
+                    name_obj_getter=lambda o: getattr(o, "fn", o),
+                    grid_from_args=True,
+                ),
+            )
+            self._patch_method(
+                ki_cls,
+                "__getitem__",
+                self._wrap_getitem(
+                    name_obj_getter=lambda o: getattr(o, "fn", o),
+                ),
+            )
 
         # 5) Launcher (also captures if grid is pre-cached)
         for launcher_cls in self._Launcher_classes:
-            self._patch_method(launcher_cls, "__call__", self._wrap_call_with_grid(
-                name_obj_getter=lambda o: getattr(o, "kernel", o),
-                grid_from_obj=True,
-            ))
-            self._patch_method(launcher_cls, "launch", self._wrap_call_with_grid(
-                name_obj_getter=lambda o: getattr(o, "kernel", o),
-                grid_from_obj=True,
-            ))
+            self._patch_method(
+                launcher_cls,
+                "__call__",
+                self._wrap_call_with_grid(
+                    name_obj_getter=lambda o: getattr(o, "kernel", o),
+                    grid_from_obj=True,
+                ),
+            )
+            self._patch_method(
+                launcher_cls,
+                "launch",
+                self._wrap_call_with_grid(
+                    name_obj_getter=lambda o: getattr(o, "kernel", o),
+                    grid_from_obj=True,
+                ),
+            )
 
         self._enabled = True
         return self
@@ -441,15 +552,15 @@ class TritonKernelLaunchHook:
 
 
 def detect_triton_usage(
-    fn_or_model: Union[Callable[..., Any], torch.nn.Module],
+    fn_or_model: Callable[..., Any] | torch.nn.Module,
     *args: Any,
     warmup: int = 1,
     steps: int = 1,
-    use_cuda: Optional[bool] = True,
+    use_cuda: bool | None = True,
     return_matches: bool = False,
-    profile_kwargs: Optional[Dict[str, Any]] = None,
+    profile_kwargs: dict[str, Any] | None = None,
     **kwargs: Any,
-) -> Union[bool, Tuple[bool, List[str]]]:
+) -> bool | tuple[bool, list[str]]:
     """
     Detect whether one or more forward calls actually invoked a Triton kernel
     (via hooking Triton's run entry points).
@@ -476,7 +587,8 @@ def detect_triton_usage(
       - Only detects Triton custom kernels; does not cover ATen / cuBLAS / cuDNN
         kernel names.
     """
-    def _run_detection(run_callable: Callable[..., Any]) -> Tuple[bool, List[str]]:
+
+    def _run_detection(run_callable: Callable[..., Any]) -> tuple[bool, list[str]]:
         # Warm up to trigger any JIT/compile + cache
         for _ in range(max(0, int(warmup))):
             _ = run_callable(*args, **kwargs)
@@ -500,8 +612,12 @@ def detect_triton_usage(
         return (False, []) if return_matches else False
 
     if isinstance(fn_or_model, torch.nn.Module):
-        run_callable_no_grad = lambda *a, **k: _call_inference_no_grad(fn_or_model, *a, **k)
-        run_callable_with_grad = lambda *a, **k: _call_inference_with_grad(fn_or_model, *a, **k)
+
+        def run_callable_no_grad(*a, **k):
+            return _call_inference_no_grad(fn_or_model, *a, **k)
+
+        def run_callable_with_grad(*a, **k):
+            return _call_inference_with_grad(fn_or_model, *a, **k)
     else:
         run_callable_no_grad = fn_or_model
         run_callable_with_grad = fn_or_model
@@ -522,17 +638,18 @@ def detect_triton_usage_for_module(
     *inputs: Any,
     warmup: int = 1,
     steps: int = 1,
-    use_cuda: Optional[bool] = None,
+    use_cuda: bool | None = None,
     return_matches: bool = False,
-    profile_kwargs: Optional[Dict[str, Any]] = None,
+    profile_kwargs: dict[str, Any] | None = None,
     **forward_kwargs: Any,
-) -> Union[bool, Tuple[bool, List[str]]]:
+) -> bool | tuple[bool, list[str]]:
     """
     Convenience wrapper: pass an nn.Module and the inputs to its forward.
     """
     # model.eval()
     return detect_triton_usage(
-        model, *inputs,
+        model,
+        *inputs,
         warmup=warmup,
         steps=steps,
         use_cuda=use_cuda,
@@ -543,8 +660,6 @@ def detect_triton_usage_for_module(
 
 
 # ============================ CUDA Detection ============================
-
-import threading
 
 
 class TorchOpsCallHook:
@@ -562,8 +677,18 @@ class TorchOpsCallHook:
     """
 
     CORE_NAMESPACES = {
-        "aten", "prim", "prims", "quantized", "mkldnn", "xnnpack",
-        "sparse", "c10", "_caffe2", "_aten", "mps", "xla"
+        "aten",
+        "prim",
+        "prims",
+        "quantized",
+        "mkldnn",
+        "xnnpack",
+        "sparse",
+        "c10",
+        "_caffe2",
+        "_aten",
+        "mps",
+        "xla",
     }
 
     def __init__(self):
@@ -576,8 +701,9 @@ class TorchOpsCallHook:
     def __enter__(self):
         try:
             import torch as _torch
+
             # Get the type of an OpOverload instance
-            sample_overload = getattr(_torch.ops, "aten").add.Tensor
+            sample_overload = _torch.ops.aten.add.Tensor
             self._OpOverload = type(sample_overload)
         except Exception:
             return self
@@ -619,8 +745,8 @@ class TorchOpsCallHook:
         try:
             self._orig_call = self._OpOverload.__call__
             if not getattr(self._orig_call, "_kb_patched", False):
-                setattr(self._OpOverload, "__call__", _patched)
-                setattr(self._OpOverload.__call__, "_kb_patched", True)
+                self._OpOverload.__call__ = _patched
+                self._OpOverload.__call__._kb_patched = True
                 self._enabled = True
         except Exception:
             pass
@@ -629,7 +755,7 @@ class TorchOpsCallHook:
     def __exit__(self, exc_type, exc, tb):
         if self._enabled and self._OpOverload and self._orig_call is not None:
             try:
-                setattr(self._OpOverload, "__call__", self._orig_call)
+                self._OpOverload.__call__ = self._orig_call
             except Exception:
                 pass
         self._enabled = False
@@ -665,10 +791,11 @@ class NumbaCudaLaunchHook:
                     except Exception:
                         pass
                     return orig_fn(obj, *args, **kwargs)
+
                 return _patched
 
             patched = _wrap(orig)
-            setattr(patched, "_kb_patched", True)
+            patched._kb_patched = True
             setattr(cls, method_name, patched)
             self._classes.append((cls, method_name, orig))
         except Exception:
@@ -732,10 +859,11 @@ class CuPyKernelLaunchHook:
                     except Exception:
                         pass
                     return orig_fn(obj, *args, **kwargs)
+
                 return _patched
 
             patched = _wrap(orig)
-            setattr(patched, "_kb_patched", True)
+            patched._kb_patched = True
             setattr(cls, method_name, patched)
             self._records.append((cls, method_name, orig))
         except Exception:
@@ -790,9 +918,7 @@ class CudaKernelLaunchHook:
         self._cupy_hook.__exit__(exc_type, exc, tb)
         # Aggregate
         self.captured = (
-            list(self._torch_hook.captured)
-            + list(self._numba_hook.captured)
-            + list(self._cupy_hook.captured)
+            list(self._torch_hook.captured) + list(self._numba_hook.captured) + list(self._cupy_hook.captured)
         )
 
 
@@ -801,7 +927,7 @@ def detect_cuda_usage(
     *args,
     warmup: int = 1,
     steps: int = 1,
-    use_cuda: Optional[bool] = True,
+    use_cuda: bool | None = True,
     return_matches: bool = False,
     **kwargs,
 ):
@@ -844,13 +970,14 @@ def detect_cuda_usage_for_module(
     *inputs,
     warmup: int = 1,
     steps: int = 1,
-    use_cuda: Optional[bool] = None,
+    use_cuda: bool | None = None,
     return_matches: bool = False,
     **forward_kwargs,
 ):
     # model.eval()
     return detect_cuda_usage(
-        model, *inputs,
+        model,
+        *inputs,
         warmup=warmup,
         steps=steps,
         use_cuda=use_cuda,

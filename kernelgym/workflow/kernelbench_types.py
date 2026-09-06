@@ -1,8 +1,8 @@
 """KernelBench task/result models (schema re-export)."""
 
 from kernelgym.schema import (
-    EvaluationTask,
     EvaluationResult,
+    EvaluationTask,
     KernelEvaluationResult,
     KernelEvaluationTask,
     ReferenceTimingResult,

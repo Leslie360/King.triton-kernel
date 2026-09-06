@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Any, Dict, Optional, Union
+from typing import Any
 
 import torch
 
 from kernelgym.config import settings
 from kernelgym.toolkit.kernelbench import triton_detect as detect
+from kernelgym.toolkit.kernelbench.correctness import run_and_check_correctness
 from kernelgym.toolkit.kernelbench.exec_types import KernelExecResult, get_error_name, set_seed
 from kernelgym.toolkit.kernelbench.loading import (
     graceful_eval_cleanup,
@@ -17,7 +18,6 @@ from kernelgym.toolkit.kernelbench.loading import (
     load_custom_model_with_tempfile,
     load_original_model_and_inputs,
 )
-from kernelgym.toolkit.kernelbench.correctness import run_and_check_correctness
 from kernelgym.toolkit.kernelbench.profiling import compute_triton_kernel_coverage
 from kernelgym.toolkit.kernelbench.timing import (
     get_timing_stats,
@@ -32,11 +32,11 @@ def _run_correctness_step(
     original_model,
     custom_model,
     get_inputs,
-    metadata: Dict[str, Any],
+    metadata: dict[str, Any],
     num_correct_trials: int,
     verbose: bool,
     seed_num: int,
-    device: Union[torch.device, int],
+    device: torch.device | int,
 ) -> KernelExecResult:
     if verbose:
         logger.info("[Eval] Checking Correctness")
@@ -64,9 +64,9 @@ def _run_triton_detection_step(
     kernel_exec_result: KernelExecResult,
     custom_model,
     get_inputs,
-    metadata: Dict[str, Any],
+    metadata: dict[str, Any],
     seed_num: int,
-    device: Union[torch.device, int],
+    device: torch.device | int,
     verbose: bool,
     backend: str,
 ):
@@ -78,10 +78,7 @@ def _run_triton_detection_step(
             torch.cuda.synchronize(device=device)
             set_seed(seed_num)
             inputs = get_inputs()
-            inputs = [
-                x.cuda(device=device) if isinstance(x, torch.Tensor) else x
-                for x in inputs
-            ]
+            inputs = [x.cuda(device=device) if isinstance(x, torch.Tensor) else x for x in inputs]
             model_new = custom_model.cuda(device=device)
             torch.cuda.synchronize(device=device)
 
@@ -98,9 +95,7 @@ def _run_triton_detection_step(
             logger.info("Triton usage detection result: %s", used)
             logger.info("Triton usage detection matches: %s", matches)
             if not used and is_triton:
-                logger.warning(
-                    "[Eval] Backend is 'triton' but no Triton usage detected, marking as decoy"
-                )
+                logger.warning("[Eval] Backend is 'triton' but no Triton usage detected, marking as decoy")
                 kernel_exec_result.decoy_kernel = True
                 kernel_exec_result.runtime = -1.0
                 return True
@@ -116,14 +111,14 @@ def _run_performance_step(
     kernel_exec_result: KernelExecResult,
     custom_model,
     get_inputs,
-    metadata: Dict[str, Any],
+    metadata: dict[str, Any],
     num_perf_trials: int,
     verbose: bool,
     seed_num: int,
-    device: Union[torch.device, int],
+    device: torch.device | int,
     enable_profiling: bool,
 ):
-    def _profiling_empty(metrics: Dict[str, Any]) -> bool:
+    def _profiling_empty(metrics: dict[str, Any]) -> bool:
         if not metrics:
             return True
         if "kernels" not in metrics:
@@ -140,10 +135,7 @@ def _run_performance_step(
             torch.cuda.synchronize(device=device)
             set_seed(seed_num)
             inputs = get_inputs()
-            inputs = [
-                x.cuda(device=device) if isinstance(x, torch.Tensor) else x
-                for x in inputs
-            ]
+            inputs = [x.cuda(device=device) if isinstance(x, torch.Tensor) else x for x in inputs]
             model_new = custom_model.cuda(device=device)
             torch.cuda.synchronize(device=device)
 
@@ -191,9 +183,7 @@ def _run_performance_step(
 
                 if _profiling_empty(profiling_metrics):
                     logger.warning("[WARNING] Profiler returned empty results!")
-                    logger.warning(
-                        "[WARNING] This may be a profiler bug, not a decoy kernel issue."
-                    )
+                    logger.warning("[WARNING] This may be a profiler bug, not a decoy kernel issue.")
                     logger.warning(
                         "[WARNING] Triton hook detected: %s",
                         metadata.get("triton_profiler_used", False),
@@ -240,9 +230,7 @@ def _run_performance_step(
                     coverage_result_dict = {
                         "num_custom_kernels": 0,
                         "num_total_kernels": 0,
-                        "triton_kernels_not_in_profiling": metadata.get(
-                            "triton_profiler_matches", []
-                        ),
+                        "triton_kernels_not_in_profiling": metadata.get("triton_profiler_matches", []),
                         "triton_kernels_in_profiling": [],
                         "total_kernel_run_time_in_profiling_us": 0,
                         "custom_kernel_cuda_time_in_profiling_us": 0,
@@ -257,12 +245,8 @@ def _run_performance_step(
                 )
                 num_custom_kernels = coverage_result_dict["num_custom_kernels"]
                 num_total_kernels = coverage_result_dict["num_total_kernels"]
-                triton_kernels_not_in_profiling = coverage_result_dict[
-                    "triton_kernels_not_in_profiling"
-                ]
-                triton_kernels_in_profiling = coverage_result_dict[
-                    "triton_kernels_in_profiling"
-                ]
+                triton_kernels_not_in_profiling = coverage_result_dict["triton_kernels_not_in_profiling"]
+                triton_kernels_in_profiling = coverage_result_dict["triton_kernels_in_profiling"]
                 total_kernel_run_time_in_profiling_us = coverage_result_dict[
                     "total_kernel_run_time_in_profiling_us"
                 ]
@@ -273,51 +257,40 @@ def _run_performance_step(
                 metadata["num_custom_kernels"] = num_custom_kernels
                 metadata["num_total_kernels"] = num_total_kernels
                 ratio = num_custom_kernels / num_total_kernels if num_total_kernels > 0 else 0
-                metadata[
-                    "triton_kernel_coverage"
-                ] = f"Run {num_custom_kernels} custom kernels / Total {num_total_kernels} kernels, Coverage: {ratio:.2%}"
-                metadata["triton_kernel_not_in_profiling"] = (
-                    triton_kernels_not_in_profiling
+                metadata["triton_kernel_coverage"] = (
+                    f"Run {num_custom_kernels} custom kernels / Total {num_total_kernels} kernels, Coverage: {ratio:.2%}"
                 )
+                metadata["triton_kernel_not_in_profiling"] = triton_kernels_not_in_profiling
                 metadata["triton_kernel_in_profiling"] = triton_kernels_in_profiling
 
-                metadata[
-                    "total_kernel_run_time_in_profiling_us"
-                ] = total_kernel_run_time_in_profiling_us
-                metadata[
-                    "custom_kernel_cuda_time_in_profiling_us"
-                ] = custom_kernel_cuda_time_in_profiling_us
+                metadata["total_kernel_run_time_in_profiling_us"] = total_kernel_run_time_in_profiling_us
+                metadata["custom_kernel_cuda_time_in_profiling_us"] = custom_kernel_cuda_time_in_profiling_us
                 ratio_time = (
-                    custom_kernel_cuda_time_in_profiling_us
-                    / total_kernel_run_time_in_profiling_us
+                    custom_kernel_cuda_time_in_profiling_us / total_kernel_run_time_in_profiling_us
                     if total_kernel_run_time_in_profiling_us > 0
                     else 0
                 )
-                metadata[
-                    "custom_kernel_cuda_time_coverage"
-                ] = (
+                metadata["custom_kernel_cuda_time_coverage"] = (
                     f"Custom kernel CUDA time: {custom_kernel_cuda_time_in_profiling_us:.2f}us / Total time: {total_kernel_run_time_in_profiling_us:.2f}us, Coverage: {ratio_time:.2%}"
                 )
 
                 if kernel_exec_result and isinstance(kernel_exec_result.metadata, dict):
                     kernel_exec_result.metadata["num_custom_kernels"] = num_custom_kernels
                     kernel_exec_result.metadata["num_total_kernels"] = num_total_kernels
-                    kernel_exec_result.metadata[
-                        "triton_kernel_coverage"
-                    ] = f"Run {num_custom_kernels} custom kernels / Total {num_total_kernels} kernels, Coverage: {ratio:.2%}"
+                    kernel_exec_result.metadata["triton_kernel_coverage"] = (
+                        f"Run {num_custom_kernels} custom kernels / Total {num_total_kernels} kernels, Coverage: {ratio:.2%}"
+                    )
                     kernel_exec_result.metadata["triton_profiler_matches"] = metadata[
                         "triton_profiler_matches"
                     ]
 
-                    kernel_exec_result.metadata[
-                        "custom_kernel_cuda_time_in_profiling_us"
-                    ] = custom_kernel_cuda_time_in_profiling_us
-                    kernel_exec_result.metadata[
-                        "total_kernel_run_time_in_profiling_us"
-                    ] = total_kernel_run_time_in_profiling_us
-                    kernel_exec_result.metadata[
-                        "custom_kernel_cuda_time_coverage"
-                    ] = (
+                    kernel_exec_result.metadata["custom_kernel_cuda_time_in_profiling_us"] = (
+                        custom_kernel_cuda_time_in_profiling_us
+                    )
+                    kernel_exec_result.metadata["total_kernel_run_time_in_profiling_us"] = (
+                        total_kernel_run_time_in_profiling_us
+                    )
+                    kernel_exec_result.metadata["custom_kernel_cuda_time_coverage"] = (
                         f"Custom kernel CUDA time: {custom_kernel_cuda_time_in_profiling_us:.2f}us / Total time: {total_kernel_run_time_in_profiling_us:.2f}us, Coverage: {ratio_time:.2%}"
                     )
 
@@ -344,6 +317,7 @@ def _run_performance_step(
             logger.error("[Eval] Error in Measuring Performance: %s", e)
         kernel_exec_result.metadata["error_during_performance"] = e
 
+
 def eval_kernel_against_ref(
     original_model_src: str,
     custom_model_src: str,
@@ -353,16 +327,16 @@ def eval_kernel_against_ref(
     verbose: bool = True,
     measure_performance: bool = True,
     build_dir: os.PathLike = None,
-    device: Union[torch.device, int] = (
-        torch.cuda.current_device() if torch.cuda.is_available() else None
-    ),
+    device: torch.device | int | None = None,
     backend: str = "cuda",
     entry_point: str = "Model",
     enable_profiling: bool = True,
     enable_triton_detection: bool = True,
-    backend_adapter: Optional[Any] = None,
+    backend_adapter: Any | None = None,
 ) -> KernelExecResult:
     assert torch.cuda.is_available(), "CUDA is not available, cannot run Eval"
+    if device is None:
+        device = torch.cuda.current_device()
     torch.set_printoptions(
         precision=4,
         threshold=10,
@@ -372,7 +346,7 @@ def eval_kernel_against_ref(
 
     torch.cuda.set_device(device)
     is_triton = backend == "triton"
-    metadata: Dict[str, Any] = {}
+    metadata: dict[str, Any] = {}
     metadata["hardware"] = torch.cuda.get_device_name(device=device)
     metadata["device"] = str(device)
 
@@ -396,9 +370,7 @@ def eval_kernel_against_ref(
     )
     set_seed(seed_num)
     init_inputs = get_init_inputs()
-    init_inputs = [
-        x.cuda(device=device) if isinstance(x, torch.Tensor) else x for x in init_inputs
-    ]
+    init_inputs = [x.cuda(device=device) if isinstance(x, torch.Tensor) else x for x in init_inputs]
 
     logger.debug("[DEBUG] init inputs: %s", init_inputs)
 
@@ -413,7 +385,7 @@ def eval_kernel_against_ref(
     with torch.no_grad():
         set_seed(seed_num)
 
-        if type(init_inputs) == list:
+        if isinstance(init_inputs, list):
             original_model = Model(*init_inputs)
         else:
             original_model = Model(**init_inputs)
@@ -498,6 +470,7 @@ def eval_kernel_against_ref(
         return KernelExecResult(compiled=False, metadata=metadata)
 
     try:
+
         def _create_custom_model():
             if backend_session is not None:
                 return backend_session.create_model(
@@ -505,7 +478,7 @@ def eval_kernel_against_ref(
                     no_grad=True,
                     synchronize=False,
                 )
-            if type(init_inputs) == list:
+            if isinstance(init_inputs, list):
                 return ModelNew(*init_inputs)
             return ModelNew(**init_inputs)
 
@@ -574,21 +547,19 @@ def eval_kernel_against_ref(
     return kernel_exec_result
 
 
-
-
 def eval_reference_only(
     original_model_src: str,
     seed_num: int = 42,
     num_perf_trials: int = 10,
     verbose: bool = False,
-    device: Union[torch.device, int] = (
-        torch.cuda.current_device() if torch.cuda.is_available() else None
-    ),
+    device: torch.device | int | None = None,
     entry_point: str = "Model",
-    reference_backend: Optional[str] = None,
-    backend_adapter: Optional[Any] = None,
+    reference_backend: str | None = None,
+    backend_adapter: Any | None = None,
 ) -> KernelExecResult:
     assert torch.cuda.is_available(), "CUDA is not available, cannot run Eval"
+    if device is None:
+        device = torch.cuda.current_device()
     # 2026-08-26 TF32-baseline switch (aligned with the KernelBench-Verified protocol):
     # the reference runs pure FP32 eager by default, while the candidate runs on
     # tensor cores → speedup is systematically overestimated.
@@ -605,11 +576,11 @@ def eval_reference_only(
     )
 
     torch.cuda.set_device(device)
-    metadata: Dict[str, Any] = {}
+    metadata: dict[str, Any] = {}
     metadata["hardware"] = torch.cuda.get_device_name(device=device)
     metadata["device"] = str(device)
 
-    context: Dict[str, Any] = {}
+    context: dict[str, Any] = {}
 
     if verbose:
         logger.info("[Eval] Start Evaluation! on device: %s", device)
@@ -621,14 +592,11 @@ def eval_reference_only(
         )
         set_seed(seed_num)
         init_inputs = get_init_inputs()
-        init_inputs = [
-            x.cuda(device=device) if isinstance(x, torch.Tensor) else x
-            for x in init_inputs
-        ]
+        init_inputs = [x.cuda(device=device) if isinstance(x, torch.Tensor) else x for x in init_inputs]
 
         with torch.no_grad():
             set_seed(seed_num)
-            if type(init_inputs) == list:
+            if isinstance(init_inputs, list):
                 original_model = Model(*init_inputs)
             else:
                 original_model = Model(**init_inputs)
@@ -651,10 +619,7 @@ def eval_reference_only(
         torch.cuda.synchronize(device=device)
         set_seed(seed_num)
         inputs = get_inputs()
-        inputs = [
-            x.cuda(device=device) if isinstance(x, torch.Tensor) else x
-            for x in inputs
-        ]
+        inputs = [x.cuda(device=device) if isinstance(x, torch.Tensor) else x for x in inputs]
         model = original_model.cuda(device=device)
         if reference_backend:
             backend_name = reference_backend.lower()

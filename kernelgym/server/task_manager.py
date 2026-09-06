@@ -10,13 +10,13 @@ import json
 import logging
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any
 
 import redis.asyncio as redis
 
-from kernelgym.common import TaskStatus, Priority, ErrorCode
-from kernelgym.config import settings
 from kernelgym.backend import list_backends
+from kernelgym.common import ErrorCode, Priority, TaskStatus
+from kernelgym.config import settings
 from kernelgym.server.code_retry_manager import CodeRetryManager
 from kernelgym.toolkit import list_toolkits
 
@@ -28,18 +28,18 @@ class TaskInfo:
     task_id: str
     status: TaskStatus
     priority: Priority
-    submitted_at: Optional[datetime] = None
-    started_at: Optional[datetime] = None
-    completed_at: Optional[datetime] = None
-    error_message: Optional[str] = None
-    result: Optional[Dict[str, Any]] = None
+    submitted_at: datetime | None = None
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    error_message: str | None = None
+    result: dict[str, Any] | None = None
 
 
 class WorkerLoadBalancer:
     """Simple round-robin worker load balancer."""
 
     def __init__(self):
-        self.available_workers: Dict[str, Dict[str, Any]] = {}
+        self.available_workers: dict[str, dict[str, Any]] = {}
         self.current_index = 0
         self._lock = asyncio.Lock()
 
@@ -60,7 +60,7 @@ class WorkerLoadBalancer:
             if worker_id in self.available_workers:
                 self.available_workers[worker_id]["last_heartbeat"] = datetime.now()
 
-    async def get_next_worker(self) -> Optional[str]:
+    async def get_next_worker(self) -> str | None:
         async with self._lock:
             now = datetime.now()
             fresh_online = []
@@ -100,9 +100,9 @@ class TaskManager:
             Priority.NORMAL: f"{self.queue_prefix}priority:normal",
             Priority.LOW: f"{self.queue_prefix}priority:low",
         }
-        self.worker_queues: Dict[str, str] = {}
-        self.active_tasks: Dict[str, TaskInfo] = {}
-        self.worker_registry: Dict[str, Dict[str, Any]] = {}
+        self.worker_queues: dict[str, str] = {}
+        self.active_tasks: dict[str, TaskInfo] = {}
+        self.worker_registry: dict[str, dict[str, Any]] = {}
         self.worker_load_balancer = WorkerLoadBalancer()
         self.retry_manager = CodeRetryManager(redis_client)
         self._background_tasks: list[asyncio.Task] = []
@@ -137,7 +137,7 @@ class TaskManager:
         if timeout_sec > 0 and interval_raw > 0:
             self._background_tasks.append(asyncio.create_task(self._queue_wait_monitor()))
 
-    def _parse_iso_datetime(self, value: Optional[Any]) -> Optional[datetime]:
+    def _parse_iso_datetime(self, value: Any | None) -> datetime | None:
         if not value:
             return None
         if isinstance(value, bytes):
@@ -149,7 +149,7 @@ class TaskManager:
         except Exception:
             return None
 
-    def _load_task_json(self, task_data: Dict[bytes, bytes]) -> Dict[str, Any]:
+    def _load_task_json(self, task_data: dict[bytes, bytes]) -> dict[str, Any]:
         raw = task_data.get(b"data")
         if not raw:
             return {}
@@ -160,7 +160,7 @@ class TaskManager:
         except Exception:
             return {}
 
-    def _get_task_timeout_sec(self, task_data: Dict[bytes, bytes], task_json: Dict[str, Any]) -> int:
+    def _get_task_timeout_sec(self, task_data: dict[bytes, bytes], task_json: dict[str, Any]) -> int:
         timeout_val = task_json.get("timeout", task_json.get("per_task_timeout"))
         if timeout_val is None:
             timeout_val = settings.default_timeout
@@ -172,8 +172,8 @@ class TaskManager:
 
     def _get_queue_wait_timeout_sec(
         self,
-        task_data: Dict[bytes, bytes],
-        task_json: Dict[str, Any],
+        task_data: dict[bytes, bytes],
+        task_json: dict[str, Any],
         task_timeout_sec: int,
         default_timeout_sec: int,
     ) -> int:
@@ -191,8 +191,8 @@ class TaskManager:
     async def _requeue_task(
         self,
         task_id: str,
-        task_data: Dict[bytes, bytes],
-        task_json: Dict[str, Any],
+        task_data: dict[bytes, bytes],
+        task_json: dict[str, Any],
         reason: str,
         now_iso: str,
     ) -> None:
@@ -243,7 +243,7 @@ class TaskManager:
                     )
                     self.worker_queues[worker_id] = worker_queue_key
                     keep: list[str] = []
-                    requeue: list[tuple[str, Dict[bytes, bytes], Dict[str, Any], str]] = []
+                    requeue: list[tuple[str, dict[bytes, bytes], dict[str, Any], str]] = []
 
                     for _ in range(scan_limit):
                         tid = await self.redis.rpop(worker_queue_key)
@@ -305,11 +305,11 @@ class TaskManager:
                 logger.error(f"Error in queue wait monitor: {e}")
                 await asyncio.sleep(interval)
 
-    async def submit_evaluation_task(self, task_data: Dict[str, Any]) -> str:
+    async def submit_evaluation_task(self, task_data: dict[str, Any]) -> str:
         """Compatibility entrypoint: treat as a normal task submission."""
         return await self.submit_task(task_data)
 
-    async def submit_task(self, task_data: Dict[str, Any]) -> str:
+    async def submit_task(self, task_data: dict[str, Any]) -> str:
         task_data = dict(task_data)
         if not task_data.get("toolkit"):
             task_data["toolkit"] = settings.default_toolkit
@@ -366,7 +366,7 @@ class TaskManager:
         logger.info(f"Task {task_id} submitted with priority {priority.value}")
         return task_id
 
-    async def get_next_task(self, worker_id: str) -> Optional[Dict[str, Any]]:
+    async def get_next_task(self, worker_id: str) -> dict[str, Any] | None:
         task_id = None
         for prefix in self._prefixes_for_read():
             worker_queue_key = f"{prefix}:queue:worker:{worker_id}"
@@ -406,10 +406,12 @@ class TaskManager:
 
         task_json = json.loads(raw.decode())
         started_at = datetime.now().isoformat()
-        await self.redis.hset(task_key, mapping={"status": TaskStatus.PROCESSING.value, "started_at": started_at})
+        await self.redis.hset(
+            task_key, mapping={"status": TaskStatus.PROCESSING.value, "started_at": started_at}
+        )
         return task_json
 
-    async def complete_task(self, task_id: str, result: Dict[str, Any]):
+    async def complete_task(self, task_id: str, result: dict[str, Any]):
         completed_at = datetime.now().isoformat()
         payload = json.dumps(result)
         await self.redis.hset(
@@ -429,7 +431,7 @@ class TaskManager:
         task_id: str,
         error_message: str,
         error_code: ErrorCode = ErrorCode.UNKNOWN_ERROR,
-        prefix: Optional[str] = None,
+        prefix: str | None = None,
     ):
         failed_at = datetime.now().isoformat()
         result_prefix = f"{prefix}:result:" if prefix else self.result_prefix
@@ -446,7 +448,7 @@ class TaskManager:
             self.active_tasks[task_id].status = TaskStatus.FAILED
             self.active_tasks[task_id].error_message = error_message
 
-    async def get_task_status(self, task_id: str) -> Optional[Dict[str, Any]]:
+    async def get_task_status(self, task_id: str) -> dict[str, Any] | None:
         for prefix in self._prefixes_for_read():
             result_data = await self.redis.hgetall(f"{prefix}:result:{task_id}")
             if result_data:
@@ -483,7 +485,7 @@ class TaskManager:
 
         return None
 
-    async def get_task_result(self, task_id: str) -> Optional[Dict[str, Any]]:
+    async def get_task_result(self, task_id: str) -> dict[str, Any] | None:
         for prefix in self._prefixes_for_read():
             result_data = await self.redis.hgetall(f"{prefix}:result:{task_id}")
             if not result_data:
@@ -515,9 +517,9 @@ class TaskManager:
             return True
         return False
 
-    async def get_queue_status(self) -> Dict[str, Any]:
+    async def get_queue_status(self) -> dict[str, Any]:
         pending = 0
-        pending_by_prefix: Dict[str, int] = {}
+        pending_by_prefix: dict[str, int] = {}
         for prefix in self._prefixes_for_read():
             prefix_pending = 0
             for priority in (Priority.HIGH, Priority.NORMAL, Priority.LOW):
@@ -532,7 +534,9 @@ class TaskManager:
             "worker_queues": worker_queues,
         }
 
-    async def register_worker(self, worker_id: str, device: str, node_id: Optional[str] = None, hostname: Optional[str] = None) -> bool:
+    async def register_worker(
+        self, worker_id: str, device: str, node_id: str | None = None, hostname: str | None = None
+    ) -> bool:
         now = datetime.now().isoformat()
         await self.redis.hset(
             f"{self.worker_prefix}{worker_id}",
@@ -563,14 +567,14 @@ class TaskManager:
         await self.worker_load_balancer.unregister_worker(worker_id)
         return True
 
-    async def get_worker_data(self, worker_id: str) -> Dict[bytes, bytes]:
+    async def get_worker_data(self, worker_id: str) -> dict[bytes, bytes]:
         for prefix in self._prefixes_for_read():
             data = await self.redis.hgetall(f"{prefix}:worker:{worker_id}")
             if data:
                 return data
         return {}
 
-    async def get_workers_status(self) -> Dict[str, Any]:
+    async def get_workers_status(self) -> dict[str, Any]:
         return self.worker_registry
 
     async def update_worker_heartbeat(self, worker_id: str) -> None:

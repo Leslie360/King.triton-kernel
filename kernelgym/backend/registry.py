@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Dict, Type
-
 from kernelgym.core import Registry
 
 from .base import Backend
@@ -18,10 +16,10 @@ def get_backend(name: str) -> Backend:
     return _BACKEND_REGISTRY.get(key)()
 
 
-def register_backend(name: str, backend_cls: Type[Backend]) -> None:
+def register_backend(name: str, backend_cls: type[Backend]) -> None:
     key = name.strip().lower()
     _BACKEND_REGISTRY.register(key, backend_cls)
 
 
-def list_backends() -> Dict[str, Type[Backend]]:
+def list_backends() -> dict[str, type[Backend]]:
     return _BACKEND_REGISTRY.items()

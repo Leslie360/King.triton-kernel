@@ -78,12 +78,7 @@ def test_early_syntax_error():
 
 def test_early_fullwidth_parens_normalized():
     # Full-width parens would be a syntax error unless normalized.
-    code = (
-        "import triton\n"
-        "class ModelNew:\n"
-        "    def __init__（self）:\n"
-        "        self.x = 1\n"
-    )
+    code = "import triton\nclass ModelNew:\n    def __init__（self）:\n        self.x = 1\n"
     ok, msg, ec = early_kernel_validation(code, backend="triton")
     # After normalization `__init__（self）` -> `__init__(self)` and compiles.
     assert ok is True, (msg, ec)
@@ -92,24 +87,14 @@ def test_early_fullwidth_parens_normalized():
 
 def test_early_curly_quotes_normalized():
     # Curly double quotes inside code are normalized to straight quotes.
-    code = (
-        "import triton\n"
-        "class ModelNew:\n"
-        "    def __init__(self):\n"
-        '        self.label = “hello”\n'
-    )
+    code = "import triton\nclass ModelNew:\n    def __init__(self):\n        self.label = “hello”\n"
     ok, msg, ec = early_kernel_validation(code, backend="triton")
     assert ok is True, (msg, ec)
     assert ec is None
 
 
 def test_early_arrow_normalized():
-    code = (
-        "import triton\n"
-        "class ModelNew:\n"
-        "    def f(self, x):\n"
-        "        return x → y\n"
-    )
+    code = "import triton\nclass ModelNew:\n    def f(self, x):\n        return x → y\n"
     # `→` normalizes to `->`, which is still invalid in this context...
     # but the point is normalization happens; this exercises the replace path.
     ok, msg, ec = early_kernel_validation(code, backend="triton")
@@ -178,12 +163,7 @@ def test_early_valid_triton_kernel():
 
 def test_early_valid_simple_triton_no_jit():
     # No @triton.jit / kernel pattern -> early-return path (backend triton).
-    code = (
-        "import triton\n"
-        "class ModelNew:\n"
-        "    def __init__(self):\n"
-        "        pass\n"
-    )
+    code = "import triton\nclass ModelNew:\n    def __init__(self):\n        pass\n"
     ok, msg, ec = early_kernel_validation(code, backend="triton")
     assert ok is True, (msg, ec)
     assert ec is None

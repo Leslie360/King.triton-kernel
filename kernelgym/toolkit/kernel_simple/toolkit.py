@@ -2,17 +2,17 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import torch
 
 from kernelgym.common import ErrorCode
 from kernelgym.config import settings
 from kernelgym.schema import KernelEvaluationResult, KernelSimpleTask
-from kernelgym.toolkit.kernelbench.exec_types import set_seed, get_error_name
+from kernelgym.toolkit.base import Toolkit
+from kernelgym.toolkit.kernelbench.exec_types import get_error_name, set_seed
 from kernelgym.toolkit.kernelbench.timing import get_timing_stats, time_execution_with_cuda_event
 from kernelgym.toolkit.validation import validate_code
-from kernelgym.toolkit.base import Toolkit
 
 
 def _move_to_device(value: Any, device: torch.device) -> Any:
@@ -25,7 +25,7 @@ def _move_to_device(value: Any, device: torch.device) -> Any:
     return value
 
 
-def _normalize_case(case: Any, idx: int) -> Dict[str, Any]:
+def _normalize_case(case: Any, idx: int) -> dict[str, Any]:
     if isinstance(case, dict):
         inputs = case.get("inputs", case.get("input"))
         outputs = case.get("outputs", case.get("output"))
@@ -45,7 +45,7 @@ def _normalize_case(case: Any, idx: int) -> Dict[str, Any]:
     }
 
 
-def _normalize_cases(raw_cases: Any) -> List[Dict[str, Any]]:
+def _normalize_cases(raw_cases: Any) -> list[dict[str, Any]]:
     if raw_cases is None:
         return []
     if isinstance(raw_cases, dict):
@@ -55,8 +55,8 @@ def _normalize_cases(raw_cases: Any) -> List[Dict[str, Any]]:
     return [_normalize_case(case, idx) for idx, case in enumerate(raw_cases)]
 
 
-def _load_cases_from_code(code: str) -> Tuple[List[Dict[str, Any]], Any]:
-    context: Dict[str, Any] = {}
+def _load_cases_from_code(code: str) -> tuple[list[dict[str, Any]], Any]:
+    context: dict[str, Any] = {}
     compile(code, "<string>", "exec")
     exec(code, context)
     get_cases = context.get("get_cases")
@@ -73,7 +73,7 @@ def _load_cases_from_code(code: str) -> Tuple[List[Dict[str, Any]], Any]:
 
 
 def _load_init_inputs_from_code(code: str) -> Any:
-    context: Dict[str, Any] = {}
+    context: dict[str, Any] = {}
     compile(code, "<string>", "exec")
     exec(code, context)
     get_init_inputs = context.get("get_init_inputs")
@@ -101,15 +101,11 @@ def _compare_outputs(expected: Any, actual: Any, rtol: float, atol: float) -> bo
     if isinstance(expected, (list, tuple)) and isinstance(actual, (list, tuple)):
         if len(expected) != len(actual):
             return False
-        return all(
-            _compare_outputs(exp, act, rtol, atol) for exp, act in zip(expected, actual)
-        )
+        return all(_compare_outputs(exp, act, rtol, atol) for exp, act in zip(expected, actual, strict=True))
     if isinstance(expected, dict) and isinstance(actual, dict):
         if expected.keys() != actual.keys():
             return False
-        return all(
-            _compare_outputs(expected[k], actual[k], rtol, atol) for k in expected.keys()
-        )
+        return all(_compare_outputs(expected[k], actual[k], rtol, atol) for k in expected.keys())
     return expected == actual
 
 
@@ -118,7 +114,7 @@ class KernelSimpleToolkit(Toolkit):
 
     name = "kernel_simple"
 
-    def evaluate(self, task: Dict[str, Any], backend=None, **kwargs: Any) -> Dict[str, Any]:
+    def evaluate(self, task: dict[str, Any], backend=None, **kwargs: Any) -> dict[str, Any]:
         task_obj = KernelSimpleTask.from_dict(task)
         device = torch.device(task_obj.device)
 
@@ -154,7 +150,7 @@ class KernelSimpleToolkit(Toolkit):
 
         set_seed(42)
 
-        cases: List[Dict[str, Any]] = []
+        cases: list[dict[str, Any]] = []
         init_inputs: Any = []
         cases_source = "inline"
         try:
@@ -207,7 +203,7 @@ class KernelSimpleToolkit(Toolkit):
         if enable_profiling is None:
             enable_profiling = settings.enable_profiling
 
-        metadata: Dict[str, Any] = {
+        metadata: dict[str, Any] = {
             "device": str(device),
             "gpu_name": torch.cuda.get_device_name(device),
             "backend": task_obj.backend,
@@ -243,9 +239,9 @@ class KernelSimpleToolkit(Toolkit):
             session = backend.open_session(handle, device=device)
             model = session.create_model(init_inputs, no_grad=True, synchronize=False)
 
-            correctness: Optional[bool] = None
+            correctness: bool | None = None
             if run_correctness and has_expected:
-                failed_cases: List[str] = []
+                failed_cases: list[str] = []
                 with torch.no_grad():
                     for case in cases:
                         expected = case.get("outputs")
@@ -274,8 +270,11 @@ class KernelSimpleToolkit(Toolkit):
                     raise ValueError("Performance inputs are missing in first case")
                 perf_inputs = _move_to_device(perf_inputs, device)
                 if isinstance(perf_inputs, dict):
-                    kernel_fn = lambda: _run_model(model, perf_inputs)
-                    args: Tuple[Any, ...] = ()
+
+                    def kernel_fn():
+                        return _run_model(model, perf_inputs)
+
+                    args: tuple[Any, ...] = ()
                 else:
                     kernel_fn = model
                     if isinstance(perf_inputs, (list, tuple)):

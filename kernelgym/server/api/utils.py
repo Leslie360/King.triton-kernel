@@ -2,7 +2,7 @@
 
 import logging
 from datetime import datetime
-from typing import Dict, Any
+from typing import Any
 
 import psutil
 import torch
@@ -16,7 +16,7 @@ def format_timestamp(dt: datetime) -> str:
     return dt.isoformat() + "Z"
 
 
-async def get_gpu_info() -> Dict[str, Any]:
+async def get_gpu_info() -> dict[str, Any]:
     try:
         if not torch.cuda.is_available():
             return {"error": "CUDA not available"}
@@ -51,7 +51,7 @@ async def get_gpu_info() -> Dict[str, Any]:
         return {"error": str(exc)}
 
 
-async def get_system_health() -> Dict[str, Any]:
+async def get_system_health() -> dict[str, Any]:
     try:
         cpu_percent = psutil.cpu_percent(interval=1)
         memory = psutil.virtual_memory()
@@ -85,7 +85,7 @@ async def get_system_health() -> Dict[str, Any]:
         }
 
 
-async def get_system_metrics() -> Dict[str, Any]:
+async def get_system_metrics() -> dict[str, Any]:
     try:
         cpu_percent = psutil.cpu_percent(interval=1)
         memory = psutil.virtual_memory()
@@ -143,7 +143,7 @@ async def cleanup_old_tasks(redis_client, max_age_hours: int = 24) -> int:
         return 0
 
 
-async def get_task_statistics(redis_client) -> Dict[str, Any]:
+async def get_task_statistics(redis_client) -> dict[str, Any]:
     try:
         return {
             "total_tasks": 0,

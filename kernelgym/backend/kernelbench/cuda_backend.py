@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import os
 import tempfile
-from typing import Any, Dict
+from typing import Any
 
-from kernelgym.toolkit.kernelbench.loading import load_custom_model
 from kernelgym.toolkit.kernelbench.compile import build_compile_cache
+from kernelgym.toolkit.kernelbench.loading import load_custom_model
 from kernelgym.toolkit.validation import validate_code
 
 from .base import KernelBenchBackendBase
@@ -16,7 +16,7 @@ from .base import KernelBenchBackendBase
 class KernelBenchCudaBackend(KernelBenchBackendBase):
     name = "kernelbench.cuda"
 
-    def compile(self, code: str, **kwargs: Any) -> Dict[str, Any]:
+    def compile(self, code: str, **kwargs: Any) -> dict[str, Any]:
         device = self._normalize_device(kwargs.get("device"))
         entry_point = kwargs.get("entry_point", "ModelNew")
         backend = kwargs.get("backend", "cuda")
@@ -63,7 +63,7 @@ class KernelBenchCudaBackend(KernelBenchBackendBase):
         }
         return artifact
 
-    def load(self, artifact: Dict[str, Any], **kwargs: Any) -> Any:
+    def load(self, artifact: dict[str, Any], **kwargs: Any) -> Any:
         code = artifact.get("code")
         entry_point = artifact.get("entry_point", "ModelNew")
         build_dir = artifact.get("build_dir")

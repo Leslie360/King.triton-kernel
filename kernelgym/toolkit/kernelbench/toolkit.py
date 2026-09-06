@@ -3,23 +3,23 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict
+from typing import Any
 
 import torch
 
 from kernelgym.common import ErrorCode
 from kernelgym.config import settings
 from kernelgym.schema import (
-    EvaluationTask,
     EvaluationResult,
+    EvaluationTask,
     KernelEvaluationResult,
     KernelEvaluationTask,
     ReferenceTimingResult,
     ReferenceTimingTask,
 )
-from kernelgym.toolkit.validation import validate_code
-from kernelgym.toolkit.kernelbench.exec_types import set_seed
 from kernelgym.toolkit.kernelbench import pipeline as kernelbench_pipeline
+from kernelgym.toolkit.kernelbench.exec_types import set_seed
+from kernelgym.toolkit.validation import validate_code
 
 from ..base import Toolkit
 
@@ -53,7 +53,7 @@ class KernelBenchToolkit(Toolkit):
 
         return run_correctness, run_triton_detection, run_performance
 
-    def evaluate(self, task: Dict[str, Any], backend=None, **kwargs: Any) -> Dict[str, Any]:
+    def evaluate(self, task: dict[str, Any], backend=None, **kwargs: Any) -> dict[str, Any]:
         task_type = task.get("task_type", "evaluation")
         if task_type == "evaluation":
             result = self.evaluate_kernel(EvaluationTask.from_dict(task), backend_adapter=backend)

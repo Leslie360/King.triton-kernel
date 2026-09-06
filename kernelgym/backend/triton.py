@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import tempfile
-from typing import Any, Dict
+from typing import Any
 
 import torch
 
 
-def compile_only(kernel_code: str, device: torch.device) -> Dict[str, Any]:
+def compile_only(kernel_code: str, device: torch.device) -> dict[str, Any]:
     """Compile kernel without full evaluation (legacy stub)."""
     try:
         with tempfile.TemporaryDirectory() as temp_dir:

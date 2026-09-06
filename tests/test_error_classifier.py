@@ -8,8 +8,6 @@ validation -> compilation -> runtime -> correctness -> timeout -> system
 
 from __future__ import annotations
 
-import pytest
-
 from kernelgym.common import ErrorCode
 from kernelgym.utils.error_classifier import (
     classify_error,
@@ -154,45 +152,26 @@ class TestContextFallback:
     def test_context_validation(self):
         # error text unknown, but context says "validation" -> VALIDATION_ERROR
         assert (
-            classify_error("something odd happened", context="validation phase")
-            is ErrorCode.VALIDATION_ERROR
+            classify_error("something odd happened", context="validation phase") is ErrorCode.VALIDATION_ERROR
         )
 
     def test_context_compilation(self):
-        assert (
-            classify_error("odd error", context="during compilation")
-            is ErrorCode.COMPILATION_ERROR
-        )
+        assert classify_error("odd error", context="during compilation") is ErrorCode.COMPILATION_ERROR
 
     def test_context_runtime(self):
-        assert (
-            classify_error("odd error", context="runtime execution")
-            is ErrorCode.RUNTIME_ERROR
-        )
+        assert classify_error("odd error", context="runtime execution") is ErrorCode.RUNTIME_ERROR
 
     def test_context_correctness(self):
-        assert (
-            classify_error("odd error", context="correctness check")
-            is ErrorCode.CORRECTNESS_ERROR
-        )
+        assert classify_error("odd error", context="correctness check") is ErrorCode.CORRECTNESS_ERROR
 
     def test_context_timeout(self):
-        assert (
-            classify_error("odd error", context="timeout handling")
-            is ErrorCode.TIMEOUT_ERROR
-        )
+        assert classify_error("odd error", context="timeout handling") is ErrorCode.TIMEOUT_ERROR
 
     def test_context_system(self):
-        assert (
-            classify_error("odd error", context="system setup")
-            is ErrorCode.SYSTEM_ERROR
-        )
+        assert classify_error("odd error", context="system setup") is ErrorCode.SYSTEM_ERROR
 
     def test_context_resource(self):
-        assert (
-            classify_error("odd error", context="resource allocation")
-            is ErrorCode.RESOURCE_ERROR
-        )
+        assert classify_error("odd error", context="resource allocation") is ErrorCode.RESOURCE_ERROR
 
 
 class TestUnknown:
@@ -201,10 +180,7 @@ class TestUnknown:
 
     def test_unrecognized_with_unmatched_context(self):
         # context doesn't match any keyword and message is unknown
-        assert (
-            classify_error("odd error", context="post-processing")
-            is ErrorCode.UNKNOWN_ERROR
-        )
+        assert classify_error("odd error", context="post-processing") is ErrorCode.UNKNOWN_ERROR
 
 
 class TestOrdering:
@@ -213,10 +189,7 @@ class TestOrdering:
         assert classify_error("triton compilation failed at runtime") is ErrorCode.COMPILATION_ERROR
 
     def test_validation_wins_over_compilation(self):
-        assert (
-            classify_error("code validation error before compile")
-            is ErrorCode.VALIDATION_ERROR
-        )
+        assert classify_error("code validation error before compile") is ErrorCode.VALIDATION_ERROR
 
     def test_case_insensitive(self):
         assert classify_error("Compilation Failed On Device") is ErrorCode.COMPILATION_ERROR

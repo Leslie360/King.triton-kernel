@@ -2,7 +2,7 @@
 
 import os
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import Any
 
 from pydantic import Field, validator
 from pydantic_settings import BaseSettings
@@ -26,8 +26,7 @@ class Settings(BaseSettings):
     # The parsed list is available via the `cors_origins_list` property.
     cors_origins: str = Field(default="*", env="CORS_ORIGINS")
 
-
-    gpu_devices: List[int] = Field(default_factory=lambda: list(range(8)), env="GPU_DEVICES")
+    gpu_devices: list[int] = Field(default_factory=lambda: list(range(8)), env="GPU_DEVICES")
     gpu_memory_limit: str = Field(default="16GB", env="GPU_MEMORY_LIMIT")
     node_id: str = Field(default="", env="NODE_ID")
     worker_name_prefix: str = Field(default="", env="WORKER_NAME_PREFIX")
@@ -43,16 +42,14 @@ class Settings(BaseSettings):
     celery_broker_url: str = Field(default="redis://localhost:6379/0", env="CELERY_BROKER_URL")
     celery_result_backend: str = Field(default="redis://localhost:6379/0", env="CELERY_RESULT_BACKEND")
     celery_task_serializer: str = Field(default="json", env="CELERY_TASK_SERIALIZER")
-    celery_accept_content: List[str] = Field(default_factory=lambda: ["json"], env="CELERY_ACCEPT_CONTENT")
+    celery_accept_content: list[str] = Field(default_factory=lambda: ["json"], env="CELERY_ACCEPT_CONTENT")
     celery_timezone: str = Field(default="UTC", env="CELERY_TIMEZONE")
 
     default_num_trials: int = Field(default=100, env="DEFAULT_NUM_TRIALS")
     default_timeout: int = Field(default=600, env="DEFAULT_TIMEOUT")
     default_backend: str = Field(default="triton", env="DEFAULT_BACKEND")
     default_toolkit: str = Field(default="kernelbench", env="DEFAULT_TOOLKIT")
-    default_backend_adapter: str = Field(
-        default="kernelbench", env="DEFAULT_BACKEND_ADAPTER"
-    )
+    default_backend_adapter: str = Field(default="kernelbench", env="DEFAULT_BACKEND_ADAPTER")
     max_concurrent_tasks: int = Field(default=4, env="MAX_CONCURRENT_TASKS")
 
     verbose_error_traceback: bool = Field(
@@ -66,7 +63,7 @@ class Settings(BaseSettings):
         env="ENABLE_PROFILING",
         description="Enable torch.profiler for performance diagnostics. Default False to minimize overhead.",
     )
-    profiling_activities: List[str] = Field(
+    profiling_activities: list[str] = Field(
         default_factory=lambda: ["cpu", "cuda"],
         env="PROFILING_ACTIVITIES",
         description="Profiling activities: cpu, cuda. Use ['cpu', 'cuda'] for full profiling.",
@@ -135,7 +132,9 @@ class Settings(BaseSettings):
     worker_queue_wait_monitor_interval: int = Field(default=20, env="WORKER_QUEUE_WAIT_MONITOR_INTERVAL")
     worker_queue_wait_scan_limit: int = Field(default=200, env="WORKER_QUEUE_WAIT_SCAN_LIMIT")
     worker_execution_timeout_grace_sec: int = Field(default=60, env="WORKER_EXECUTION_TIMEOUT_GRACE_SEC")
-    worker_execution_timeout_monitor_interval: int = Field(default=30, env="WORKER_EXECUTION_TIMEOUT_MONITOR_INTERVAL")
+    worker_execution_timeout_monitor_interval: int = Field(
+        default=30, env="WORKER_EXECUTION_TIMEOUT_MONITOR_INTERVAL"
+    )
     worker_pool_size: int = Field(
         default=1,
         env="WORKER_POOL_SIZE",
@@ -156,7 +155,7 @@ class Settings(BaseSettings):
     enable_result_cache: bool = Field(default=True, env="ENABLE_RESULT_CACHE")
 
     kernelbench_path: str = Field(default=str(KERNELBENCH_ROOT), env="KERNELBENCH_PATH")
-    gpu_arch: List[str] = Field(default_factory=lambda: ["Hopper"], env="GPU_ARCH")
+    gpu_arch: list[str] = Field(default_factory=lambda: ["Hopper"], env="GPU_ARCH")
 
     rate_limit_requests: int = Field(default=1000, env="RATE_LIMIT_REQUESTS")
     rate_limit_window: int = Field(default=3600, env="RATE_LIMIT_WINDOW")
@@ -209,7 +208,7 @@ class Settings(BaseSettings):
         return self.get_redis_url()
 
     @property
-    def cors_origins_list(self) -> List[str]:
+    def cors_origins_list(self) -> list[str]:
         """Parse the `cors_origins` string into a list of origin strings.
 
         Accepts either a JSON array (`["https://a.com","https://b.com"]`) or a
@@ -235,7 +234,7 @@ class Settings(BaseSettings):
                 pass
         return [x.strip() for x in stripped.split(",") if x.strip()]
 
-    def get_celery_config(self) -> Dict[str, Any]:
+    def get_celery_config(self) -> dict[str, Any]:
         return {
             "broker_url": self.celery_broker_url,
             "result_backend": self.celery_result_backend,
@@ -299,7 +298,7 @@ TASK_CONFIGS = {
 }
 
 
-def get_logging_config() -> Dict[str, Any]:
+def get_logging_config() -> dict[str, Any]:
     settings.setup_log_directory()
 
     log_path = Path(settings.log_dir)
@@ -386,8 +385,6 @@ def get_logging_config() -> Dict[str, Any]:
             },
         },
     }
-
-    import logging.handlers
 
     return config
 

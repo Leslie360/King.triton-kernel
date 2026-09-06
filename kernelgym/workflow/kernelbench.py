@@ -2,24 +2,21 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
-from pathlib import Path
 import json
-import time
 import logging
+import time
 from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 from kernelgym.common import ErrorCode
 from kernelgym.config import settings
-from .kernelbench_types import (
-    EvaluationTask,
-    ReferenceTimingTask,
-    ReferenceTimingResult,
-    KernelEvaluationResult,
-    EvaluationResult,
-)
+
+from ..core.scheduler import SchedulerAPI
+from ..core.types import TaskSpec
+from ..core.workflow import WorkflowController, WorkflowState
 from .kernelbench_helpers import (
     _combine_results,
     _create_paired_tasks,
@@ -27,23 +24,26 @@ from .kernelbench_helpers import (
     _put_reference_cache,
     _validate_code,
 )
-
-from ..core.types import TaskSpec
-from ..core.workflow import WorkflowController, WorkflowState
-from ..core.scheduler import SchedulerAPI
+from .kernelbench_types import (
+    EvaluationResult,
+    EvaluationTask,
+    KernelEvaluationResult,
+    ReferenceTimingResult,
+    ReferenceTimingTask,
+)
 
 
 class KernelBenchWorkflowController(WorkflowController):
     """Main controller for KernelBench evaluation workflow."""
 
-    async def validate_request(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
+    async def validate_request(self, input_data: dict[str, Any]) -> dict[str, Any]:
         eval_task = EvaluationTask.from_dict(input_data)
         validation = self._validate_inputs(eval_task)
         validation["task_id"] = eval_task.task_id
         validation["workflow"] = "kernelbench"
         return validation
 
-    async def handle_request(self, input_data: Dict[str, Any], scheduler: SchedulerAPI) -> Dict[str, Any]:
+    async def handle_request(self, input_data: dict[str, Any], scheduler: SchedulerAPI) -> dict[str, Any]:
         eval_task = EvaluationTask.from_dict(input_data)
         state = WorkflowState({"base_task_id": eval_task.task_id})
 
@@ -99,16 +99,12 @@ class KernelBenchWorkflowController(WorkflowController):
         kernel_task_id = await scheduler.submit(kernel_task_spec)
         kernel_result_dict = await scheduler.wait(kernel_task_id)
         logger.info(
-            "PHASE_TIMING task=%s phase=kernel "
-            "elapsed=%.3f "
-            "perf_trials=%s "
-            "correct_trials=%s "
-            "compiled=%s",
+            "PHASE_TIMING task=%s phase=kernel elapsed=%.3f perf_trials=%s correct_trials=%s compiled=%s",
             eval_task.task_id,
             time.time() - _t_k0,
             eval_task.num_perf_trials,
             eval_task.num_correct_trials,
-            bool(kernel_result_dict.get('compiled')) if kernel_result_dict else False,
+            bool(kernel_result_dict.get("compiled")) if kernel_result_dict else False,
         )
 
         if not kernel_result_dict:
@@ -149,7 +145,7 @@ class KernelBenchWorkflowController(WorkflowController):
             self._persist_result(eval_task, result)
             return result
 
-        ref_result: Optional[ReferenceTimingResult] = None
+        ref_result: ReferenceTimingResult | None = None
         if ref_task is None:
             cached_runtime = _get_cached_reference_runtime(
                 eval_task.uuid, eval_task.reference_code, eval_task.is_valid
@@ -157,19 +153,19 @@ class KernelBenchWorkflowController(WorkflowController):
             if cached_runtime is not None:
                 ref_result = self._cached_reference_result(eval_task, cached_runtime)
             else:
-                    ref_task = ReferenceTimingTask(
-                        task_id=f"{eval_task.task_id}_ref",
-                        base_task_id=eval_task.task_id,
-                        reference_code=eval_task.reference_code,
-                        backend=eval_task.backend,
-                        num_perf_trials=eval_task.num_perf_trials,
-                        timeout=eval_task.timeout,
-                        device=eval_task.device,
-                        priority=eval_task.priority,
-                        entry_point=eval_task.entry_point,
-                        reference_backend=eval_task.reference_backend,
-                        device_preference=eval_task.device_preference,
-                    )
+                ref_task = ReferenceTimingTask(
+                    task_id=f"{eval_task.task_id}_ref",
+                    base_task_id=eval_task.task_id,
+                    reference_code=eval_task.reference_code,
+                    backend=eval_task.backend,
+                    num_perf_trials=eval_task.num_perf_trials,
+                    timeout=eval_task.timeout,
+                    device=eval_task.device,
+                    priority=eval_task.priority,
+                    entry_point=eval_task.entry_point,
+                    reference_backend=eval_task.reference_backend,
+                    device_preference=eval_task.device_preference,
+                )
 
         if ref_result is None and ref_task is not None:
             ref_payload = ref_task.to_dict()
@@ -186,9 +182,7 @@ class KernelBenchWorkflowController(WorkflowController):
             ref_task_id = await scheduler.submit(ref_task_spec)
             ref_result_dict = await scheduler.wait(ref_task_id)
             logger.info(
-                "PHASE_TIMING task=%s phase=reference "
-                "elapsed=%.3f "
-                "perf_trials=%s",
+                "PHASE_TIMING task=%s phase=reference elapsed=%.3f perf_trials=%s",
                 eval_task.task_id,
                 time.time() - _t_r0,
                 eval_task.num_perf_trials,
@@ -236,7 +230,9 @@ class KernelBenchWorkflowController(WorkflowController):
             status="completed",
         )
 
-    def _kernel_only_result(self, eval_task: EvaluationTask, kernel_result: KernelEvaluationResult) -> Dict[str, Any]:
+    def _kernel_only_result(
+        self, eval_task: EvaluationTask, kernel_result: KernelEvaluationResult
+    ) -> dict[str, Any]:
         metadata = dict(kernel_result.metadata or {})
         metadata["kernel_task_id"] = kernel_result.task_id
         result = EvaluationResult(
@@ -254,7 +250,7 @@ class KernelBenchWorkflowController(WorkflowController):
         )
         return result.to_dict()
 
-    def _failed_result(self, task_id: str, message: str) -> Dict[str, Any]:
+    def _failed_result(self, task_id: str, message: str) -> dict[str, Any]:
         result = EvaluationResult(
             task_id=task_id,
             compiled=False,
@@ -269,7 +265,7 @@ class KernelBenchWorkflowController(WorkflowController):
         )
         return result.to_dict()
 
-    def _validation_failed_result(self, task_id: str, message: str) -> Dict[str, Any]:
+    def _validation_failed_result(self, task_id: str, message: str) -> dict[str, Any]:
         result = EvaluationResult(
             task_id=task_id,
             compiled=False,
@@ -285,7 +281,7 @@ class KernelBenchWorkflowController(WorkflowController):
         )
         return result.to_dict()
 
-    def _validate_inputs(self, eval_task: EvaluationTask) -> Dict[str, Any]:
+    def _validate_inputs(self, eval_task: EvaluationTask) -> dict[str, Any]:
         errors = []
 
         resources = eval_task.resources or {}
@@ -320,7 +316,7 @@ class KernelBenchWorkflowController(WorkflowController):
             "resources": resources,
         }
 
-    def _persist_result(self, eval_task: EvaluationTask, result: Dict[str, Any]) -> None:
+    def _persist_result(self, eval_task: EvaluationTask, result: dict[str, Any]) -> None:
         if not settings.save_eval_results:
             return
         try:

@@ -13,36 +13,43 @@ Enhancement: Persistent monitoring mode (opt-in via --persistent or env)
     - Its recorded PID is not alive, or
     - It meets original restart conditions (CUDA error shutdown / heartbeat timeout).
 """
+
+import argparse
 import asyncio
 import logging
-import sys
 import os
-from datetime import datetime, timedelta
-from typing import Dict, Any, Optional, Set
-import argparse
-import redis.asyncio as redis
 import signal
+import sys
+from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Any
+
+import redis.asyncio as redis
 
 from kernelgym.config import settings
+
 KEY_PREFIX = settings.redis_key_prefix
+from redis.exceptions import BusyLoadingError
+from redis.exceptions import ConnectionError as RedisConnectionError
+from redis.exceptions import ResponseError as RedisResponseError
+from redis.exceptions import TimeoutError as RedisTimeoutError
+
 from kernelgym.config import setup_logging
-from redis.exceptions import BusyLoadingError, ConnectionError as RedisConnectionError, TimeoutError as RedisTimeoutError, ResponseError as RedisResponseError
 
 logger = logging.getLogger("kernelgym.worker_monitor")
 
 
 class WorkerMonitor:
     """Monitors worker health and manages restarts."""
-    
+
     def __init__(self, redis_client: redis.Redis, persistent: bool = False):
         self.redis = redis_client
         self.running = False
-        self.monitored_workers: Dict[str, Dict[str, Any]] = {}
+        self.monitored_workers: dict[str, dict[str, Any]] = {}
         self.restart_queue: asyncio.Queue = asyncio.Queue()
-        self.restart_in_progress: Set[str] = set()
+        self.restart_in_progress: set[str] = set()
         self.persistent: bool = persistent
-        
+
         # Configuration
         self.heartbeat_timeout = max(5, settings.worker_monitor_heartbeat_timeout)
         self.monitor_interval = max(5, settings.worker_monitor_interval)
@@ -57,8 +64,7 @@ class WorkerMonitor:
         # (<=105s with retries); if tasks_processed stays flat for longer than
         # this threshold, the worker is making no progress -> restart the whole
         # worker (process-group kill + GPU reset tears down the orphaned context).
-        self.task_progress_timeout = max(60, getattr(
-            settings, "worker_monitor_task_progress_timeout", 180))
+        self.task_progress_timeout = max(60, getattr(settings, "worker_monitor_task_progress_timeout", 180))
         logger.info(
             "Worker monitor configured with heartbeat_timeout=%ss, monitor_interval=%ss, restart_cooldown=%ss, task_progress_timeout=%ss",
             self.heartbeat_timeout,
@@ -66,37 +72,37 @@ class WorkerMonitor:
             self.restart_cooldown,
             self.task_progress_timeout,
         )
-        
+
         # Signal handlers
         signal.signal(signal.SIGINT, self._signal_handler)
         signal.signal(signal.SIGTERM, self._signal_handler)
-    
+
     def _signal_handler(self, signum, frame):
         """Handle shutdown signals."""
         logger.info(f"Worker monitor received signal {signum}")
         self.running = False
-    
+
     async def start(self):
         """Start the worker monitor."""
         self.running = True
         logger.info("Starting worker monitor")
-        
+
         try:
             # Start monitoring and restart tasks
             monitor_task = asyncio.create_task(self._monitor_loop())
             restart_task = asyncio.create_task(self._restart_loop())
-            
+
             await asyncio.gather(monitor_task, restart_task)
-            
+
         except Exception as e:
             logger.error(f"Error in worker monitor: {e}")
             raise
-    
+
     async def stop(self):
         """Stop the worker monitor."""
         logger.info("Stopping worker monitor")
         self.running = False
-    
+
     async def _monitor_loop(self):
         """Main monitoring loop."""
         while self.running:
@@ -106,33 +112,33 @@ class WorkerMonitor:
             except Exception as e:
                 logger.error(f"Error in monitor loop: {e}")
                 await asyncio.sleep(self.monitor_interval)
-    
+
     async def _check_workers(self):
         """Check health of all workers."""
         try:
             # Get all worker keys
             worker_keys = await self.redis.keys(f"{KEY_PREFIX}:worker:*")
             # In persistent mode, load expected workers set once per cycle
-            expected_ids: Set[str] = set()
+            expected_ids: set[str] = set()
             if self.persistent:
                 try:
                     raw = await self.redis.smembers(f"{KEY_PREFIX}:expected_workers")
-                    expected_ids = {wid.decode() if isinstance(wid, bytes) else wid for wid in raw} if raw else set()
+                    expected_ids = (
+                        {wid.decode() if isinstance(wid, bytes) else wid for wid in raw} if raw else set()
+                    )
                 except Exception:
                     expected_ids = set()
-            
+
             for key in worker_keys:
                 worker_id = key.decode().split(":")[-1]
-                
+
                 # Get worker status
                 worker_data = await self.redis.hgetall(key)
                 if not worker_data:
                     continue
-                
+
                 # Decode data
-                worker_info = {
-                    k.decode(): v.decode() for k, v in worker_data.items()
-                }
+                worker_info = {k.decode(): v.decode() for k, v in worker_data.items()}
 
                 # Parse progress fields for wedged-GPU detection. The heartbeat
                 # writes current_task + tasks_processed each cycle; a worker
@@ -157,19 +163,19 @@ class WorkerMonitor:
                 # Check if worker needs restart
                 needs_restart = False
                 restart_reason = ""
-                
+
                 # Check for CUDA error shutdown
                 if worker_info.get("cuda_error_shutdown") == "true":
                     needs_restart = True
                     restart_reason = "CUDA error shutdown"
-                
+
                 # Check heartbeat timeout
                 elif "last_heartbeat" in worker_info:
                     last_heartbeat = datetime.fromisoformat(worker_info["last_heartbeat"])
                     if datetime.now() - last_heartbeat > timedelta(seconds=self.heartbeat_timeout):
                         needs_restart = True
                         restart_reason = "Heartbeat timeout"
-                
+
                 # Check if worker is marked as offline
                 elif worker_info.get("online") == "false":
                     # Check if it's been offline for too long
@@ -179,9 +185,7 @@ class WorkerMonitor:
                             needs_restart = True
                             restart_reason = "Worker offline"
                     else:
-                        self.monitored_workers[worker_id] = {
-                            "offline_since": datetime.now()
-                        }
+                        self.monitored_workers[worker_id] = {"offline_since": datetime.now()}
 
                 # Wedged-GPU detection: worker reports online + is on a task but
                 # tasks_processed has not advanced for > task_progress_timeout.
@@ -207,23 +211,25 @@ class WorkerMonitor:
 
                 if needs_restart and worker_id not in self.restart_in_progress:
                     logger.warning(f"Worker {worker_id} needs restart: {restart_reason}")
-                    
+
                     # Get device info from worker ID (e.g., worker_gpu_0 -> cuda:0)
                     # Prefer reading device from Redis if available
                     worker_key = f"{KEY_PREFIX}:worker:{worker_id}"
                     worker_data = await self.redis.hgetall(worker_key)
                     device = worker_data.get(b"device", b"").decode() or f"cuda:{worker_id.split('_')[-1]}"
-                    
+
                     # Add to restart queue
-                    await self.restart_queue.put({
-                        "worker_id": worker_id,
-                        "device": device,
-                        "reason": restart_reason,
-                        "timestamp": datetime.now()
-                    })
-                    
+                    await self.restart_queue.put(
+                        {
+                            "worker_id": worker_id,
+                            "device": device,
+                            "reason": restart_reason,
+                            "timestamp": datetime.now(),
+                        }
+                    )
+
                     self.restart_in_progress.add(worker_id)
-                
+
                 # Update monitoring info
                 self.monitored_workers[worker_id] = {
                     "last_check": datetime.now(),
@@ -237,7 +243,7 @@ class WorkerMonitor:
             # their heartbeat keys are missing or their PIDs are dead.
             if self.persistent:
                 await self._check_persistent_expectations()
-                
+
         except Exception as e:
             logger.error(f"Error checking workers: {e}")
 
@@ -247,7 +253,11 @@ class WorkerMonitor:
         try:
             # Load expected workers set
             expected_ids_raw = await self.redis.smembers(f"{KEY_PREFIX}:expected_workers")
-            expected_ids = {wid.decode() if isinstance(wid, bytes) else wid for wid in expected_ids_raw} if expected_ids_raw else set()
+            expected_ids = (
+                {wid.decode() if isinstance(wid, bytes) else wid for wid in expected_ids_raw}
+                if expected_ids_raw
+                else set()
+            )
 
             # Build set of existing heartbeat worker ids
             existing_keys = await self.redis.keys(f"{KEY_PREFIX}:worker:*")
@@ -262,12 +272,14 @@ class WorkerMonitor:
                 edata = await self.redis.hgetall(f"{KEY_PREFIX}:expected_worker:{wid}")
                 device = edata.get(b"device", b"").decode() if edata else f"cuda:{wid.split('_')[-1]}"
                 logger.warning(f"Worker {wid} missing heartbeat key; scheduling restart (persistent mode)")
-                await self.restart_queue.put({
-                    "worker_id": wid,
-                    "device": device,
-                    "reason": "Missing heartbeat key",
-                    "timestamp": datetime.now()
-                })
+                await self.restart_queue.put(
+                    {
+                        "worker_id": wid,
+                        "device": device,
+                        "reason": "Missing heartbeat key",
+                        "timestamp": datetime.now(),
+                    }
+                )
                 self.restart_in_progress.add(wid)
 
             # Check PID liveness for all expected workers
@@ -281,13 +293,17 @@ class WorkerMonitor:
                     if wid not in existing_ids:
                         edata = await self.redis.hgetall(f"{KEY_PREFIX}:expected_worker:{wid}")
                         device = edata.get(b"device", b"").decode() if edata else f"cuda:{wid.split('_')[-1]}"
-                        logger.warning(f"Worker {wid} has no process info and no heartbeat; restarting (persistent mode)")
-                        await self.restart_queue.put({
-                            "worker_id": wid,
-                            "device": device,
-                            "reason": "Missing process info & heartbeat",
-                            "timestamp": datetime.now()
-                        })
+                        logger.warning(
+                            f"Worker {wid} has no process info and no heartbeat; restarting (persistent mode)"
+                        )
+                        await self.restart_queue.put(
+                            {
+                                "worker_id": wid,
+                                "device": device,
+                                "reason": "Missing process info & heartbeat",
+                                "timestamp": datetime.now(),
+                            }
+                        )
                         self.restart_in_progress.add(wid)
                     continue
                 try:
@@ -303,36 +319,37 @@ class WorkerMonitor:
                     except OSError:
                         # Dead process
                         device = proc_info.get(b"device", b"").decode() or f"cuda:{wid.split('_')[-1]}"
-                        logger.warning(f"Worker {wid} PID {pid} not alive; scheduling restart (persistent mode)")
-                        await self.restart_queue.put({
-                            "worker_id": wid,
-                            "device": device,
-                            "reason": "Process dead",
-                            "timestamp": datetime.now()
-                        })
+                        logger.warning(
+                            f"Worker {wid} PID {pid} not alive; scheduling restart (persistent mode)"
+                        )
+                        await self.restart_queue.put(
+                            {
+                                "worker_id": wid,
+                                "device": device,
+                                "reason": "Process dead",
+                                "timestamp": datetime.now(),
+                            }
+                        )
                         self.restart_in_progress.add(wid)
         except Exception as e:
             logger.error(f"Error in persistent expectation check: {e}")
-    
+
     async def _restart_loop(self):
         """Process worker restart requests."""
         while self.running:
             try:
                 # Get restart request with timeout
                 try:
-                    restart_info = await asyncio.wait_for(
-                        self.restart_queue.get(), 
-                        timeout=10.0
-                    )
+                    restart_info = await asyncio.wait_for(self.restart_queue.get(), timeout=10.0)
                 except asyncio.TimeoutError:
                     continue
-                
+
                 worker_id = restart_info["worker_id"]
                 device = restart_info["device"]
                 reason = restart_info["reason"]
-                
+
                 logger.info(f"Attempting to restart worker {worker_id} on {device}: {reason}")
-                
+
                 # Restart worker
                 success = await self._restart_worker(worker_id, device)
 
@@ -341,9 +358,7 @@ class WorkerMonitor:
                     # Clear restart flags IMMEDIATELY to prevent re-detection during initialization
                     # If worker crashes during init, we'll detect it via PID check or missing heartbeat
                     await self.redis.hdel(
-                        f"{KEY_PREFIX}:worker:{worker_id}",
-                        "cuda_error_shutdown",
-                        "shutdown_time"
+                        f"{KEY_PREFIX}:worker:{worker_id}", "cuda_error_shutdown", "shutdown_time"
                     )
                     # Give worker time to initialize (API registration + GPU init can take 30-60s)
                     # This prevents the monitor from immediately detecting the worker as "missing"
@@ -358,7 +373,7 @@ class WorkerMonitor:
 
                 # Remove from in-progress set
                 self.restart_in_progress.discard(worker_id)
-                
+
             except Exception as e:
                 logger.error(f"Error in restart loop: {e}")
                 await asyncio.sleep(5)
@@ -376,17 +391,18 @@ class WorkerMonitor:
             device: Device string (e.g., "cuda:0")
         """
         try:
-            device_id = int(device.split(':')[-1])
+            device_id = int(device.split(":")[-1])
             logger.info(f"Attempting to reset GPU device {device_id}")
 
             # Strategy 1: Use nvidia-smi to reset GPU (most effective)
             import subprocess
+
             try:
                 result = subprocess.run(
-                    ['nvidia-smi', '--gpu-reset', '-i', str(device_id)],
+                    ["nvidia-smi", "--gpu-reset", "-i", str(device_id)],
                     capture_output=True,
                     text=True,
-                    timeout=10
+                    timeout=10,
                 )
                 if result.returncode == 0:
                     logger.info(f"Successfully reset GPU {device_id} using nvidia-smi")
@@ -427,10 +443,7 @@ except Exception as e:
     sys.exit(1)
 """
                 result = subprocess.run(
-                    [sys.executable, '-c', reset_script],
-                    capture_output=True,
-                    text=True,
-                    timeout=10
+                    [sys.executable, "-c", reset_script], capture_output=True, text=True, timeout=10
                 )
                 if result.returncode == 0:
                     logger.info(f"Reset GPU {device_id} using PyTorch: {result.stdout.strip()}")
@@ -456,20 +469,22 @@ except Exception as e:
 
             # Wait a bit for cleanup
             await asyncio.sleep(5)
-            
+
             # Start new worker process
             import subprocess
-            import functools
-            
+
             # Build command to start single worker
             cmd = [
                 sys.executable,
-                "-m", "kernelgym.worker.single_worker",
-                "--worker-id", worker_id,
-                "--device", device,
-                "--persistent"
+                "-m",
+                "kernelgym.worker.single_worker",
+                "--worker-id",
+                worker_id,
+                "--device",
+                device,
+                "--persistent",
             ]
-            
+
             # Ensure logs directory exists and append logs to the same pattern as manual start
             logs_dir = Path("logs")
             logs_dir.mkdir(parents=True, exist_ok=True)
@@ -485,6 +500,7 @@ except Exception as e:
                 # On Windows, use CREATE_NEW_PROCESS_GROUP if available
                 try:
                     import subprocess as sp
+
                     creationflags = getattr(sp, "CREATE_NEW_PROCESS_GROUP", 0)
                 except Exception:
                     creationflags = 0
@@ -494,35 +510,35 @@ except Exception as e:
                 stderr=subprocess.STDOUT,
                 env={**os.environ},
                 preexec_fn=preexec_fn,
-                creationflags=creationflags
+                creationflags=creationflags,
             )
-            
+
             # Wait a bit to ensure it started
             await asyncio.sleep(5)
-            
+
             # Check if process is running
             if process.poll() is None:
                 logger.info(f"Worker {worker_id} process started with PID {process.pid}")
-                
+
                 # Store process info
                 await self.redis.hset(
                     f"{KEY_PREFIX}:worker_process:{worker_id}",
                     mapping={
                         "pid": str(process.pid),
                         "start_time": datetime.now().isoformat(),
-                        "device": device
-                    }
+                        "device": device,
+                    },
                 )
-                
+
                 return True
             else:
                 logger.error(f"Worker {worker_id} process exited immediately")
                 return False
-                
+
         except Exception as e:
             logger.error(f"Error restarting worker {worker_id}: {e}")
             return False
-    
+
     async def _kill_worker_process(self, worker_id: str):
         """Kill existing worker process."""
         try:
@@ -533,6 +549,7 @@ except Exception as e:
                 if pid:
                     import os
                     import signal
+
                     try:
                         # Try to terminate the whole process group first
                         try:
@@ -545,9 +562,10 @@ except Exception as e:
                         except Exception:
                             os.kill(pid, signal.SIGTERM)
                             logger.info(f"Sent SIGTERM to worker {worker_id} (PID {pid})")
-                        
+
                         # Wait up to 10s, then escalate to SIGKILL
                         import time
+
                         deadline = time.time() + 10
                         while time.time() < deadline:
                             try:
@@ -568,10 +586,10 @@ except Exception as e:
                                 pass
                     except ProcessLookupError:
                         logger.info(f"Worker {worker_id} process (PID {pid}) not found")
-                    
+
                     # Clean up process info
                     await self.redis.delete(f"{KEY_PREFIX}:worker_process:{worker_id}")
-                    
+
         except Exception as e:
             logger.error(f"Error killing worker process {worker_id}: {e}")
 
@@ -580,12 +598,16 @@ async def main():
     """Main entry point for worker monitor."""
     # Parse CLI args
     parser = argparse.ArgumentParser(description="KernelGym Worker Monitor")
-    parser.add_argument("--persistent", action="store_true", help="Enable persistent monitoring (restart workers even if heartbeat keys disappear)")
+    parser.add_argument(
+        "--persistent",
+        action="store_true",
+        help="Enable persistent monitoring (restart workers even if heartbeat keys disappear)",
+    )
     args = parser.parse_args()
 
     # Configure logging
     logger = setup_logging("worker_monitor")
-    
+
     # Initialize Redis connection with readiness wait
     async def _wait_for_redis_ready(url: str, timeout_sec: float = 60.0, interval_sec: float = 0.5):
         start = asyncio.get_event_loop().time()
@@ -610,10 +632,10 @@ async def main():
 
     redis_client = await _wait_for_redis_ready(settings.redis_url)
     logger.info("Redis connection established for worker monitor")
-    
+
     # Create and start monitor
     monitor = WorkerMonitor(redis_client, persistent=bool(args.persistent))
-    
+
     try:
         await monitor.start()
     except KeyboardInterrupt:
@@ -628,4 +650,5 @@ async def main():
 
 if __name__ == "__main__":
     import os
+
     asyncio.run(main())

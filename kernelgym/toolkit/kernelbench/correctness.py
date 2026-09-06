@@ -45,9 +45,7 @@ def run_and_check_correctness(
     pass_count = 0
 
     torch.manual_seed(seed)
-    correctness_trial_seeds = [
-        torch.randint(0, 2**32 - 1, (1,)).item() for _ in range(num_correct_trials)
-    ]
+    correctness_trial_seeds = [torch.randint(0, 2**32 - 1, (1,)).item() for _ in range(num_correct_trials)]
 
     with torch.no_grad():
         for trial in range(num_correct_trials):
@@ -57,10 +55,7 @@ def run_and_check_correctness(
 
             set_seed(trial_seed)
             inputs = get_inputs_fn()
-            inputs = [
-                x.cuda(device=device) if isinstance(x, torch.Tensor) else x
-                for x in inputs
-            ]
+            inputs = [x.cuda(device=device) if isinstance(x, torch.Tensor) else x for x in inputs]
 
             set_seed(trial_seed)
             model = original_model_instance.cuda(device=device)
@@ -91,9 +86,7 @@ def run_and_check_correctness(
                             output.shape,
                             output_new.shape,
                         )
-                    return KernelExecResult(
-                        compiled=True, correctness=False, metadata=metadata
-                    )
+                    return KernelExecResult(compiled=True, correctness=False, metadata=metadata)
 
                 # Handle bool tensors: cast to float before diffing, since bool
                 # does not support subtraction
@@ -116,13 +109,9 @@ def run_and_check_correctness(
                 logger.error("[Error] Exception happens during correctness check")
                 logger.error("Error in launching kernel for ModelNew: %s", e)
 
-                metadata = register_and_format_exception(
-                    "runtime_error", e, metadata, truncate=False
-                )
+                metadata = register_and_format_exception("runtime_error", e, metadata, truncate=False)
                 metadata["runtime_error_name"] = get_error_name(e)
-                return KernelExecResult(
-                    compiled=True, correctness=False, metadata=metadata
-                )
+                return KernelExecResult(compiled=True, correctness=False, metadata=metadata)
 
     if verbose:
         logger.info(

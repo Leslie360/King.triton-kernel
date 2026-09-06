@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Optional
+from typing import Any
 
 from .types import TaskSpec
 
@@ -14,11 +14,11 @@ class SchedulerAPI(ABC):
         """Submit a task and return its task_id."""
 
     @abstractmethod
-    async def wait(self, task_id: str, timeout: Optional[float] = None) -> Dict[str, Any]:
+    async def wait(self, task_id: str, timeout: float | None = None) -> dict[str, Any]:
         """Wait for a task result and return the raw result payload."""
 
     @abstractmethod
-    async def get_status(self, task_id: str) -> Dict[str, Any]:
+    async def get_status(self, task_id: str) -> dict[str, Any]:
         """Return status metadata for a task."""
 
     @abstractmethod

@@ -2,17 +2,17 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any
 
 from kernelgym.common import ErrorCode
-from kernelgym.schema import KernelEvaluationResult, KernelSimpleTask
-from kernelgym.toolkit.validation import validate_code
+from kernelgym.core.scheduler import SchedulerAPI
 from kernelgym.core.types import TaskSpec
 from kernelgym.core.workflow import WorkflowController, WorkflowState
-from kernelgym.core.scheduler import SchedulerAPI
+from kernelgym.schema import KernelEvaluationResult, KernelSimpleTask
+from kernelgym.toolkit.validation import validate_code
 
 
-def _resolve_entry_point(kernel_code: str, entry_point: Optional[str]) -> str:
+def _resolve_entry_point(kernel_code: str, entry_point: str | None) -> str:
     if entry_point and entry_point != "Model":
         return entry_point
     if "class ModelNew" in kernel_code:
@@ -23,7 +23,7 @@ def _resolve_entry_point(kernel_code: str, entry_point: Optional[str]) -> str:
 class KernelSimpleWorkflowController(WorkflowController):
     """Workflow controller for kernel-only evaluation."""
 
-    async def validate_request(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
+    async def validate_request(self, input_data: dict[str, Any]) -> dict[str, Any]:
         task = KernelSimpleTask.from_dict(input_data)
         entry_point = _resolve_entry_point(task.kernel_code, task.entry_point)
         valid, error = validate_code(task.kernel_code, entry_point)
@@ -38,7 +38,7 @@ class KernelSimpleWorkflowController(WorkflowController):
             "kernel": {"valid": valid, "error": error, "entry_point": entry_point},
         }
 
-    async def handle_request(self, input_data: Dict[str, Any], scheduler: SchedulerAPI) -> Dict[str, Any]:
+    async def handle_request(self, input_data: dict[str, Any], scheduler: SchedulerAPI) -> dict[str, Any]:
         task = KernelSimpleTask.from_dict(input_data)
         task.entry_point = _resolve_entry_point(task.kernel_code, task.entry_point)
         state = WorkflowState({"base_task_id": task.task_id})
@@ -86,7 +86,7 @@ class KernelSimpleWorkflowController(WorkflowController):
         result.setdefault("task_id", task.task_id)
         return result
 
-    def _failed_result(self, task_id: str, message: str, error_code: ErrorCode) -> Dict[str, Any]:
+    def _failed_result(self, task_id: str, message: str, error_code: ErrorCode) -> dict[str, Any]:
         result = KernelEvaluationResult(
             task_id=task_id,
             base_task_id=task_id,

@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Optional, Tuple
-
 from kernelgym.common import ErrorCode
 
 
-def validate_code(code: str, entry_point: str = "Model") -> Tuple[bool, str]:
+def validate_code(code: str, entry_point: str = "Model") -> tuple[bool, str]:
     """Basic validation of PyTorch code."""
     try:
         if not code:
@@ -23,7 +21,7 @@ def early_kernel_validation(
     kernel_code: str,
     backend: str = "triton",
     entry_point: str = "Model",
-) -> Tuple[bool, str, Optional[ErrorCode]]:
+) -> tuple[bool, str, ErrorCode | None]:
     """Perform early kernel code validation without GPU resources."""
     try:
         kernel_entry_point = f"{entry_point}New"
@@ -36,11 +34,27 @@ def early_kernel_validation(
             # full-width punctuation / dashes / arrows — harmless in comments and
             # strings; kept consistent with reward_client._cheap_syntax_filter)
             _k = kernel_code
-            for _c, _r in [("’","'"),("‘","'"),("“",'"'),("”",'"'),
-                           ("—","-"),("–","-"),("―","-"),
-                           ("→","->"),("←","<-"),("⇒","=>"),
-                           ("、",","),("，",","),("：",":"),("；",";"),
-                           ("（","("),("）",")"),("［","["),("］","]"),("…","...")]:
+            for _c, _r in [
+                ("’", "'"),
+                ("‘", "'"),
+                ("“", '"'),
+                ("”", '"'),
+                ("—", "-"),
+                ("–", "-"),
+                ("―", "-"),
+                ("→", "->"),
+                ("←", "<-"),
+                ("⇒", "=>"),
+                ("、", ","),
+                ("，", ","),
+                ("：", ":"),
+                ("；", ";"),
+                ("（", "("),
+                ("）", ")"),
+                ("［", "["),
+                ("］", "]"),
+                ("…", "..."),
+            ]:
                 _k = _k.replace(_c, _r)
             compile(_k, "<string>", "exec")
         except SyntaxError as e:
@@ -58,7 +72,11 @@ def early_kernel_validation(
                 "from numba import cuda",
             ]
             if not any(indicator in kernel_code for indicator in cuda_indicators):
-                return False, "Kernel code must contain CUDA kernel code for cuda backend", ErrorCode.IMPORT_ERROR
+                return (
+                    False,
+                    "Kernel code must contain CUDA kernel code for cuda backend",
+                    ErrorCode.IMPORT_ERROR,
+                )
 
         kernel_patterns = [
             "@triton.jit",

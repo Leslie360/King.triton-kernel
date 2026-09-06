@@ -1,46 +1,52 @@
 """FastAPI server for KernelGym."""
+
 import asyncio
+import json
 import logging
+import time
+from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import Dict, List, Optional, Any
+from typing import Any
+
+import redis.asyncio as redis
 import uvicorn
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends, status, Request
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request, status
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from fastapi.exceptions import RequestValidationError
-import redis.asyncio as redis
-from contextlib import asynccontextmanager
-import json
-import time
+from redis.exceptions import BusyLoadingError
+from redis.exceptions import ConnectionError as RedisConnectionError
+from redis.exceptions import ResponseError as RedisResponseError
+from redis.exceptions import TimeoutError as RedisTimeoutError
 
+from kernelgym.common import ErrorCode, TaskStatus
 from kernelgym.config import settings, setup_logging
+from kernelgym.server.scheduler import TaskManagerScheduler
+from kernelgym.server.task_manager import TaskManager
+from kernelgym.utils.error_classifier import classify_error
+from kernelgym.workflow import get_workflow_controller
+
 from .models import (
-    EvaluationRequest,
-    EvaluationResponse,
     BatchEvaluationRequest,
     BatchEvaluationResponse,
-    TaskStatusResponse,
-    SystemHealthResponse,
-    MetricsResponse,
     ErrorResponse,
+    EvaluationRequest,
+    EvaluationResponse,
+    MetricsResponse,
+    SystemHealthResponse,
+    TaskStatusResponse,
     WorkflowRequest,
     WorkflowResponse,
 )
-from .utils import get_system_health, get_system_metrics, format_timestamp
-from kernelgym.server.task_manager import TaskManager
-from kernelgym.server.scheduler import TaskManagerScheduler
-from kernelgym.workflow import get_workflow_controller
-from redis.exceptions import BusyLoadingError, ConnectionError as RedisConnectionError, TimeoutError as RedisTimeoutError, ResponseError as RedisResponseError
-from kernelgym.utils.error_classifier import classify_error
-from kernelgym.common import ErrorCode, TaskStatus
 from .monitoring_routes import router as monitoring_router
+from .utils import format_timestamp, get_system_health, get_system_metrics
 
 # Configure logging with file support
 logger = logging.getLogger("kernelgym.api")
 
 # Global variables
-task_manager: Optional[TaskManager] = None
-redis_client: Optional[redis.Redis] = None
+task_manager: TaskManager | None = None
+redis_client: redis.Redis | None = None
 
 
 @asynccontextmanager
@@ -59,6 +65,7 @@ async def lifespan(app: FastAPI):
             InMemoryReferenceCache,
             set_reference_cache,
         )
+
         set_reference_cache(InMemoryReferenceCache())
         logger.info("[refcache] InMemoryReferenceCache registered (A4, K3 §20 Q2)")
     except Exception as e:
@@ -66,10 +73,10 @@ async def lifespan(app: FastAPI):
 
     # Setup logging first
     setup_logging("api")
-    
+
     # Startup
     logger.info("Starting KernelGym...")
-    
+
     # Initialize Redis connection with readiness wait (handle RDB/AOF loading)
     async def _wait_for_redis_ready(url: str, timeout_sec: float = 60.0, interval_sec: float = 0.5):
         start = asyncio.get_event_loop().time()
@@ -95,18 +102,18 @@ async def lifespan(app: FastAPI):
 
     redis_client = await _wait_for_redis_ready(settings.redis_url)
     logger.info("Redis connection established")
-    
+
     # Initialize task manager
     task_manager = TaskManager(redis_client)
     await task_manager.initialize()
     logger.info("Task manager initialized")
-    
+
     # Initialize GPU workers
     logger.info(f"Initializing GPU workers for devices: {settings.gpu_devices}")
-    
+
     # Store task manager in app state for access in endpoints
     app.state.task_manager = task_manager
-    
+
     # Currently we register workers via url. So we do not need to use this waiting.
     # Wait for at least one worker to register
     # if settings.gpu_devices:
@@ -114,24 +121,24 @@ async def lifespan(app: FastAPI):
     #     max_wait_time = 30  # seconds
     #     check_interval = 1  # second
     #     start_time = asyncio.get_event_loop().time()
-        
+
     #     while True:
     #         workers_status = await task_manager.get_workers_status()
     #         online_workers = sum(1 for w in workers_status.values() if w.get("online"))
-            
+
     #         if online_workers > 0:
     #             logger.info(f"✅ {online_workers} worker(s) online and ready")
     #             break
-            
+
     #         elapsed = asyncio.get_event_loop().time() - start_time
     #         if elapsed > max_wait_time:
     #             logger.warning(f"⚠️  No workers registered after {max_wait_time}s. Starting anyway...")
     #             break
-            
+
     #         await asyncio.sleep(check_interval)
-    
+
     yield
-    
+
     # Shutdown
     logger.info("Shutting down KernelGym...")
     if task_manager:
@@ -142,10 +149,7 @@ async def lifespan(app: FastAPI):
 
 # Create FastAPI app
 app = FastAPI(
-    title="KernelGym",
-    description="GPU Kernel Evaluation Service",
-    version="1.0.0",
-    lifespan=lifespan
+    title="KernelGym", description="GPU Kernel Evaluation Service", version="1.0.0", lifespan=lifespan
 )
 
 # Add CORS middleware. Origins come from settings.cors_origins_list (env
@@ -161,12 +165,11 @@ app.add_middleware(
 
 # Include routers
 app.include_router(monitoring_router)
+
+
 # Node ID allocation endpoint (server-assigned node identifiers)
 @app.post("/node/allocate")
-async def allocate_node_id(
-    hostname: str,
-    node_name: Optional[str] = None
-) -> Dict[str, Any]:
+async def allocate_node_id(hostname: str, node_name: str | None = None) -> dict[str, Any]:
     """Allocate or return a stable node_id for a given hostname.
 
     Args:
@@ -203,7 +206,7 @@ async def allocate_node_id(
         primary_prefix = settings.redis_key_prefix
         legacy_prefix = settings.redis_key_prefix_legacy
 
-        def _keys(prefix: str) -> Dict[str, str]:
+        def _keys(prefix: str) -> dict[str, str]:
             return {
                 "nodes": f"{prefix}:nodes",
                 "hosts": f"{prefix}:nodes_by_host",
@@ -220,7 +223,9 @@ async def allocate_node_id(
             if not existing_hostname and keys_legacy:
                 existing_hostname = await redis_client.hget(keys_legacy["names"], node_name)
             if existing_hostname:
-                existing_hostname_str = existing_hostname.decode() if isinstance(existing_hostname, bytes) else existing_hostname
+                existing_hostname_str = (
+                    existing_hostname.decode() if isinstance(existing_hostname, bytes) else existing_hostname
+                )
                 if existing_hostname_str != hostname:
                     logger.warning(
                         f"node_name={node_name} already assigned to different hostname={existing_hostname_str}, "
@@ -228,7 +233,7 @@ async def allocate_node_id(
                     )
                     raise HTTPException(
                         status_code=409,
-                        detail=f"node_name '{node_name}' already assigned to hostname '{existing_hostname_str}'"
+                        detail=f"node_name '{node_name}' already assigned to hostname '{existing_hostname_str}'",
                     )
                 # Same node_name + hostname, idempotent return
                 logger.info(f"Returning existing node_name={node_name} for hostname={hostname}")
@@ -273,7 +278,7 @@ async def allocate_node_id(
         raise
     except Exception as e:
         logger.error(f"Error allocating node id for hostname={hostname}, node_name={node_name}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 # Add request logging middleware
@@ -281,10 +286,10 @@ async def allocate_node_id(
 async def log_requests(request: Request, call_next):
     """Log all requests and responses."""
     start_time = time.time()
-    
+
     # Log request
     logger.info(f"Request: {request.method} {request.url}")
-    
+
     # For POST requests, try to log the body (but don't log sensitive data)
     if request.method == "POST":
         try:
@@ -295,18 +300,18 @@ async def log_requests(request: Request, call_next):
                     json_body = json.loads(body)
                     task_id = json_body.get("task_id", "unknown")
                     logger.info(f"Request body for task {task_id}: {len(body)} bytes")
-                except:
+                except Exception:
                     logger.info(f"Request body: {len(body)} bytes")
-        except:
+        except Exception:
             pass
-    
+
     # Process the request
     response = await call_next(request)
-    
+
     # Log response
     process_time = time.time() - start_time
     logger.info(f"Response: {response.status_code} - {process_time:.4f}s")
-    
+
     return response
 
 
@@ -314,8 +319,7 @@ async def get_task_manager() -> TaskManager:
     """Dependency to get task manager."""
     if task_manager is None:
         raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Task manager not available"
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Task manager not available"
         )
     return task_manager
 
@@ -324,17 +328,16 @@ async def get_redis_client() -> redis.Redis:
     """Dependency to get Redis client."""
     if redis_client is None:
         raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Redis client not available"
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Redis client not available"
         )
     return redis_client
 
 
-def _result_status(payload: Dict[str, Any]) -> TaskStatus:
+def _result_status(payload: dict[str, Any]) -> TaskStatus:
     return TaskStatus.FAILED if payload.get("status") == "failed" else TaskStatus.COMPLETED
 
 
-def _strip_status(payload: Dict[str, Any]) -> Dict[str, Any]:
+def _strip_status(payload: dict[str, Any]) -> dict[str, Any]:
     cleaned = dict(payload)
     cleaned.pop("status", None)
     return cleaned
@@ -343,10 +346,10 @@ def _strip_status(payload: Dict[str, Any]) -> Dict[str, Any]:
 async def _execute_workflow(
     task_mgr: TaskManager,
     workflow_name: str,
-    payload: Dict[str, Any],
-    task_id: Optional[str] = None,
+    payload: dict[str, Any],
+    task_id: str | None = None,
     force_refresh: bool = False,
-) -> tuple[str, Dict[str, Any], TaskStatus]:
+) -> tuple[str, dict[str, Any], TaskStatus]:
     if task_id:
         payload = dict(payload)
         payload["task_id"] = task_id
@@ -382,7 +385,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     error_details = exc.errors()
     error_msg = f"Request validation failed: {error_details}"
     logger.error(f"Validation error for {request.url}: {error_msg}")
-    
+
     error_code = ErrorCode.VALIDATION_ERROR
     return JSONResponse(
         status_code=400,
@@ -390,9 +393,9 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
             error="RequestValidationError",
             message=error_msg,
             error_code=error_code,
-            timestamp=format_timestamp(datetime.now())
+            timestamp=format_timestamp(datetime.now()),
         ).dict(),
-        headers={"X-Error-Code": error_code.value}
+        headers={"X-Error-Code": error_code.value},
     )
 
 
@@ -407,20 +410,20 @@ async def global_exception_handler(request, exc):
             error="InternalServerError",
             message=str(exc),
             error_code=error_code,
-            timestamp=format_timestamp(datetime.now())
+            timestamp=format_timestamp(datetime.now()),
         ).dict(),
-        headers={"X-Error-Code": error_code.value}
+        headers={"X-Error-Code": error_code.value},
     )
 
 
-@app.get("/", response_model=Dict[str, str])
+@app.get("/", response_model=dict[str, str])
 async def root():
     """Root endpoint."""
     return {
         "name": "KernelGym",
         "version": "1.0.0",
         "description": "GPU Kernel Evaluation Service",
-        "timestamp": format_timestamp(datetime.now())
+        "timestamp": format_timestamp(datetime.now()),
     }
 
 
@@ -448,13 +451,11 @@ async def debug_validate(request: EvaluationRequest):
     return validation
 
 
-
-
 @app.post("/evaluate", response_model=EvaluationResponse)
 async def evaluate_kernel(
     request: EvaluationRequest,
     background_tasks: BackgroundTasks,
-    task_mgr: TaskManager = Depends(get_task_manager)
+    task_mgr: TaskManager = Depends(get_task_manager),
 ):
     """Submit a kernel evaluation task."""
     try:
@@ -466,7 +467,7 @@ async def evaluate_kernel(
             force_refresh=request.force_refresh,
         )
         return EvaluationResponse(status=status_value, **_strip_status(result))
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -475,21 +476,21 @@ async def evaluate_kernel(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to submit task: {str(e)}",
-            headers={"X-Error-Code": error_code.value}
-        )
+            headers={"X-Error-Code": error_code.value},
+        ) from e
 
 
 @app.post("/evaluate/batch", response_model=BatchEvaluationResponse)
 async def evaluate_batch(
     request: BatchEvaluationRequest,
     background_tasks: BackgroundTasks,
-    task_mgr: TaskManager = Depends(get_task_manager)
+    task_mgr: TaskManager = Depends(get_task_manager),
 ):
     """Submit a batch of evaluation tasks."""
     try:
         batch_results = []
         failed_tasks = 0
-        
+
         for task_request in request.tasks:
             try:
                 _, result, status_value = await _execute_workflow(
@@ -502,19 +503,21 @@ async def evaluate_batch(
                 if status_value == TaskStatus.FAILED:
                     failed_tasks += 1
                 batch_results.append(EvaluationResponse(status=status_value, **_strip_status(result)))
-                
+
             except Exception as e:
                 logger.error(f"Error processing task {task_request.task_id}: {e}")
                 error_code = classify_error(str(e), "system")
-                batch_results.append(EvaluationResponse(
-                    task_id=task_request.task_id,
-                    status=TaskStatus.FAILED,
-                    error_message=str(e),
-                    error_code=error_code,
-                    submitted_at=format_timestamp(datetime.now())
-                ))
+                batch_results.append(
+                    EvaluationResponse(
+                        task_id=task_request.task_id,
+                        status=TaskStatus.FAILED,
+                        error_message=str(e),
+                        error_code=error_code,
+                        submitted_at=format_timestamp(datetime.now()),
+                    )
+                )
                 failed_tasks += 1
-        
+
         return BatchEvaluationResponse(
             batch_id=request.batch_id,
             total_tasks=len(request.tasks),
@@ -522,15 +525,14 @@ async def evaluate_batch(
             failed_tasks=failed_tasks,
             results=batch_results,
             batch_status=TaskStatus.COMPLETED,
-            submitted_at=format_timestamp(datetime.now())
+            submitted_at=format_timestamp(datetime.now()),
         )
-        
+
     except Exception as e:
         logger.error(f"Error processing batch {request.batch_id}: {e}")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to process batch: {str(e)}"
-        )
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to process batch: {str(e)}"
+        ) from e
 
 
 @app.post("/workflow/submit", response_model=WorkflowResponse)
@@ -540,7 +542,9 @@ async def submit_workflow(
 ):
     """Submit a workflow task with generic payload."""
     try:
-        task_id = request.task_id or request.payload.get("task_id") if isinstance(request.payload, dict) else None
+        task_id = (
+            request.task_id or request.payload.get("task_id") if isinstance(request.payload, dict) else None
+        )
         payload = request.payload
         if isinstance(payload, dict) and payload.get("resources") is None and request.resources is not None:
             payload = dict(payload)
@@ -570,7 +574,7 @@ async def submit_workflow(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to submit workflow: {str(e)}",
             headers={"X-Error-Code": error_code.value},
-        )
+        ) from e
 
 
 @app.get("/workflow/results/{task_id}", response_model=WorkflowResponse)
@@ -605,87 +609,70 @@ async def get_workflow_results(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to get workflow results: {str(e)}",
-        )
+        ) from e
+
 
 @app.get("/status/{task_id}", response_model=TaskStatusResponse)
-async def get_task_status(
-    task_id: str,
-    task_mgr: TaskManager = Depends(get_task_manager)
-):
+async def get_task_status(task_id: str, task_mgr: TaskManager = Depends(get_task_manager)):
     """Get task status."""
     try:
         status_info = await task_mgr.get_task_status(task_id)
         if not status_info:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Task {task_id} not found"
-            )
-        
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Task {task_id} not found")
+
         return TaskStatusResponse(**status_info)
-        
+
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error getting status for task {task_id}: {e}")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get task status: {str(e)}"
-        )
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get task status: {str(e)}"
+        ) from e
 
 
 @app.get("/results/{task_id}", response_model=EvaluationResponse)
-async def get_task_results(
-    task_id: str,
-    task_mgr: TaskManager = Depends(get_task_manager)
-):
+async def get_task_results(task_id: str, task_mgr: TaskManager = Depends(get_task_manager)):
     """Get task results."""
     try:
         result = await task_mgr.get_task_result(task_id)
         if not result:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Task {task_id} not found"
-            )
-        
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Task {task_id} not found")
+
         result = dict(result)
         result.setdefault("task_id", task_id)
         status_value = _result_status(result)
         return EvaluationResponse(status=status_value, **_strip_status(result))
-        
+
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error getting results for task {task_id}: {e}")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get task results: {str(e)}"
-        )
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get task results: {str(e)}"
+        ) from e
 
 
 @app.delete("/tasks/{task_id}")
-async def cancel_task(
-    task_id: str,
-    task_mgr: TaskManager = Depends(get_task_manager)
-):
+async def cancel_task(task_id: str, task_mgr: TaskManager = Depends(get_task_manager)):
     """Cancel a task."""
     try:
         success = await task_mgr.cancel_task(task_id)
         if not success:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Task {task_id} not found or cannot be cancelled"
+                detail=f"Task {task_id} not found or cannot be cancelled",
             )
-        
+
         return {"message": f"Task {task_id} cancelled successfully"}
-        
+
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error cancelling task {task_id}: {e}")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to cancel task: {str(e)}"
-        )
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to cancel task: {str(e)}"
+        ) from e
 
 
 @app.get("/health", response_model=SystemHealthResponse)
@@ -694,13 +681,12 @@ async def health_check():
     try:
         health_info = await get_system_health()
         return SystemHealthResponse(**health_info)
-        
+
     except Exception as e:
         logger.error(f"Error getting system health: {e}")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get system health: {str(e)}"
-        )
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get system health: {str(e)}"
+        ) from e
 
 
 @app.get("/metrics", response_model=MetricsResponse)
@@ -709,84 +695,77 @@ async def get_metrics():
     try:
         metrics = await get_system_metrics()
         return MetricsResponse(**metrics)
-        
+
     except Exception as e:
         logger.error(f"Error getting metrics: {e}")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get metrics: {str(e)}"
-        )
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get metrics: {str(e)}"
+        ) from e
 
 
 @app.get("/queue/status")
-async def get_queue_status(
-    task_mgr: TaskManager = Depends(get_task_manager)
-):
+async def get_queue_status(task_mgr: TaskManager = Depends(get_task_manager)):
     """Get queue status."""
     try:
         queue_info = await task_mgr.get_queue_status()
         return queue_info
-        
+
     except Exception as e:
         logger.error(f"Error getting queue status: {e}")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get queue status: {str(e)}"
-        )
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get queue status: {str(e)}"
+        ) from e
 
 
 @app.get("/workers/status")
-async def get_workers_status(
-    task_mgr: TaskManager = Depends(get_task_manager)
-):
+async def get_workers_status(task_mgr: TaskManager = Depends(get_task_manager)):
     """Get workers status."""
     try:
         workers_info = await task_mgr.get_workers_status()
         return workers_info
-        
+
     except Exception as e:
         logger.error(f"Error getting workers status: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get workers status: {str(e)}"
-        )
+            detail=f"Failed to get workers status: {str(e)}",
+        ) from e
 
 
 @app.post("/worker/register")
 async def register_worker(
     worker_id: str,
     device: str,
-    node_id: Optional[str] = None,
-    hostname: Optional[str] = None,
-    task_manager: TaskManager = Depends(get_task_manager)
-) -> Dict[str, Any]:
+    node_id: str | None = None,
+    hostname: str | None = None,
+    task_manager: TaskManager = Depends(get_task_manager),
+) -> dict[str, Any]:
     """Register a worker with the server."""
     try:
-        logger.info(f"/worker/register received: worker_id={worker_id}, device={device}, node_id={node_id}, hostname={hostname}")
+        logger.info(
+            f"/worker/register received: worker_id={worker_id}, device={device}, node_id={node_id}, hostname={hostname}"
+        )
         success = await task_manager.register_worker(worker_id, device, node_id=node_id, hostname=hostname)
         if success:
             # LB snapshot
             lb_keys = list(task_manager.worker_load_balancer.available_workers.keys())
-            logger.info(f"Worker {worker_id} registered successfully with device {device}; LB now has: {lb_keys}")
+            logger.info(
+                f"Worker {worker_id} registered successfully with device {device}; LB now has: {lb_keys}"
+            )
             return {"success": True, "message": f"Worker {worker_id} registered", "node_id": node_id or ""}
         else:
             raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to register worker"
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to register worker"
             )
     except Exception as e:
         logger.error(f"Error registering worker {worker_id}: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
-        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)) from e
 
 
 @app.post("/worker/unregister")
 async def unregister_worker(
-    worker_id: str,
-    task_manager: TaskManager = Depends(get_task_manager)
-) -> Dict[str, Any]:
+    worker_id: str, task_manager: TaskManager = Depends(get_task_manager)
+) -> dict[str, Any]:
     """Unregister a worker from the server."""
     try:
         success = await task_manager.unregister_worker(worker_id)
@@ -795,39 +774,39 @@ async def unregister_worker(
             return {"success": True, "message": f"Worker {worker_id} unregistered"}
         else:
             raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to unregister worker"
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to unregister worker"
             )
     except Exception as e:
         logger.error(f"Error unregistering worker {worker_id}: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
-        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)) from e
 
 
 @app.post("/worker/heartbeat")
 async def worker_heartbeat(
     worker_id: str,
     device: str | None = None,
-    node_id: Optional[str] = None,
-    hostname: Optional[str] = None,
-    task_manager: TaskManager = Depends(get_task_manager)
-) -> Dict[str, Any]:
+    node_id: str | None = None,
+    hostname: str | None = None,
+    task_manager: TaskManager = Depends(get_task_manager),
+) -> dict[str, Any]:
     """Update worker heartbeat."""
     try:
-        logger.info(f"/worker/heartbeat received: worker_id={worker_id}, device={device}, node_id={node_id}, hostname={hostname}")
+        logger.info(
+            f"/worker/heartbeat received: worker_id={worker_id}, device={device}, node_id={node_id}, hostname={hostname}"
+        )
         # If not known, only auto-register when device is provided and consistent
         if worker_id not in task_manager.worker_registry:
             # Read stored device (if any) from Redis
             worker_data = await task_manager.get_worker_data(worker_id)
             stored_device = worker_data.get(b"device", b"").decode() if worker_data else ""
-            
+
             if not device and not stored_device:
                 # Unknown device, refuse to auto-register
                 logger.warning(f"Heartbeat auto-register refused: unknown device for {worker_id}")
-                raise HTTPException(status_code=status.HTTP_409_CONFLICT,
-                                    detail=f"Worker {worker_id} not registered and device unknown; please register explicitly")
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f"Worker {worker_id} not registered and device unknown; please register explicitly",
+                )
             # Prefer provided device, fall back to stored device if provided is None
             resolved_device = device or stored_device
 
@@ -839,22 +818,34 @@ async def worker_heartbeat(
                     existing_node_id = info.get("node_id")
                     if existing_node_id == node_id:
                         # Same device on same node = conflict
-                        logger.warning(f"Heartbeat auto-register refused: device {resolved_device} already used by {wid} on node {node_id}")
-                        raise HTTPException(status_code=status.HTTP_409_CONFLICT,
-                                            detail=f"Device {resolved_device} already in use by {wid} on node {node_id}")
-            
+                        logger.warning(
+                            f"Heartbeat auto-register refused: device {resolved_device} already used by {wid} on node {node_id}"
+                        )
+                        raise HTTPException(
+                            status_code=status.HTTP_409_CONFLICT,
+                            detail=f"Device {resolved_device} already in use by {wid} on node {node_id}",
+                        )
+
             # If stored device exists and differs from provided -> refuse
             if stored_device and device and stored_device != device:
-                logger.warning(f"Heartbeat auto-register refused: device mismatch stored={stored_device}, provided={device}")
-                raise HTTPException(status_code=status.HTTP_409_CONFLICT,
-                                    detail=f"Device mismatch for {worker_id}: stored={stored_device}, provided={device}")
-            
-            ok = await task_manager.register_worker(worker_id, resolved_device, node_id=node_id, hostname=hostname)
+                logger.warning(
+                    f"Heartbeat auto-register refused: device mismatch stored={stored_device}, provided={device}"
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f"Device mismatch for {worker_id}: stored={stored_device}, provided={device}",
+                )
+
+            ok = await task_manager.register_worker(
+                worker_id, resolved_device, node_id=node_id, hostname=hostname
+            )
             if not ok:
-                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                                    detail=f"Failed to auto-register worker {worker_id}")
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=f"Failed to auto-register worker {worker_id}",
+                )
             logger.info(f"Auto-registered worker {worker_id} on heartbeat with device {resolved_device}")
-        
+
         # Device-conflict / empty-node_id guard: read registration, validate
         # node_id/hostname/device consistency
         try:
@@ -868,8 +859,12 @@ async def worker_heartbeat(
                     reg["hostname"] = hostname
                 # If the device differs, refuse the heartbeat
                 if device and reg.get("device") and reg.get("device") != device:
-                    logger.warning(f"Heartbeat refused: device mismatch for {worker_id}, reg={reg.get('device')} req={device}")
-                    raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Device mismatch; please re-register")
+                    logger.warning(
+                        f"Heartbeat refused: device mismatch for {worker_id}, reg={reg.get('device')} req={device}"
+                    )
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT, detail="Device mismatch; please re-register"
+                    )
         except Exception:
             pass
 
@@ -883,17 +878,13 @@ async def worker_heartbeat(
         raise
     except Exception as e:
         logger.error(f"Error updating heartbeat for worker {worker_id}: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
-        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)) from e
 
 
 @app.post("/worker/evict_from_lb")
 async def evict_from_lb(
-    worker_id: str,
-    task_manager: TaskManager = Depends(get_task_manager)
-) -> Dict[str, Any]:
+    worker_id: str, task_manager: TaskManager = Depends(get_task_manager)
+) -> dict[str, Any]:
     """Evict a worker from in-memory load balancer without deleting its Redis state."""
     try:
         await task_manager.worker_load_balancer.unregister_worker(worker_id)
@@ -903,18 +894,18 @@ async def evict_from_lb(
         return {"success": True, "message": f"Worker {worker_id} evicted from LB"}
     except Exception as e:
         logger.error(f"Error evicting {worker_id} from LB: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 if __name__ == "__main__":
     # Setup logging for direct run
     setup_logging("api")
-    
+
     uvicorn.run(
         "kernelgym.server.api.server:app",
         host=settings.api_host,
         port=settings.api_port,
         workers=settings.api_workers,
         reload=settings.api_reload,
-        log_level=settings.log_level.lower()
+        log_level=settings.log_level.lower(),
     )

@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import Any, Dict, Iterable
+from typing import Any
 
 
 @dataclass
 class Registry:
-    _items: Dict[str, Any] = field(default_factory=dict)
+    _items: dict[str, Any] = field(default_factory=dict)
 
     def register(self, name: str, obj: Any) -> None:
         if name in self._items:
@@ -23,5 +24,5 @@ class Registry:
     def list(self) -> Iterable[str]:
         return tuple(self._items.keys())
 
-    def items(self) -> Dict[str, Any]:
+    def items(self) -> dict[str, Any]:
         return dict(self._items)

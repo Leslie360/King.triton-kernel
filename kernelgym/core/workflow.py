@@ -4,22 +4,22 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Dict, Optional
+from typing import Any
 
 from .scheduler import SchedulerAPI
 
 
 @dataclass
 class WorkflowState:
-    data: Dict[str, Any] = field(default_factory=dict)
+    data: dict[str, Any] = field(default_factory=dict)
 
 
 class WorkflowController(ABC):
     @abstractmethod
-    async def handle_request(self, input_data: Dict[str, Any], scheduler: SchedulerAPI) -> Dict[str, Any]:
+    async def handle_request(self, input_data: dict[str, Any], scheduler: SchedulerAPI) -> dict[str, Any]:
         """Run the workflow and return the final response payload."""
 
-    async def validate_request(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
+    async def validate_request(self, input_data: dict[str, Any]) -> dict[str, Any]:
         """Optional request validation hook."""
         return {"valid": True}
 
@@ -27,12 +27,12 @@ class WorkflowController(ABC):
         self,
         state: WorkflowState,
         task_id: str,
-        result: Dict[str, Any],
+        result: dict[str, Any],
         scheduler: SchedulerAPI,
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """Optional hook for incremental decision making."""
         return None
 
-    async def aggregate(self, state: WorkflowState) -> Dict[str, Any]:
+    async def aggregate(self, state: WorkflowState) -> dict[str, Any]:
         """Aggregate state into a final response payload."""
         return dict(state.data)

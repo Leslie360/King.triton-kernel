@@ -6,7 +6,6 @@ import importlib.util
 import logging
 import os
 import tempfile
-from typing import Tuple
 
 import torch
 import torch.nn as nn
@@ -16,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 def load_original_model_and_inputs(
     model_original_src: str, context: dict, entry_point: str = "Model"
-) -> Tuple[nn.Module, callable, callable]:
+) -> tuple[nn.Module, callable, callable]:
     try:
         compile(model_original_src, "<string>", "exec")
     except SyntaxError as e:
@@ -49,13 +48,11 @@ def load_custom_model_with_tempfile(model_custom_src: str, entry_point: str = "M
     return ModelNew, temp_file
 
 
-def load_custom_model(
-    model_custom_src: str, context: dict, build_directory: str = None
-) -> nn.Module:
+def load_custom_model(model_custom_src: str, context: dict, build_directory: str = None) -> nn.Module:
     if build_directory:
         context["BUILD_DIRECTORY"] = build_directory
         model_custom_src = (
-            "import os\n" f"os.environ['TORCH_EXTENSIONS_DIR'] = '{build_directory}'\n"
+            f"import os\nos.environ['TORCH_EXTENSIONS_DIR'] = '{build_directory}'\n"
         ) + model_custom_src
 
     try:

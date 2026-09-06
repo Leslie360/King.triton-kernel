@@ -1,19 +1,23 @@
 """
 Single GPU Worker launcher for KernelGym.
 """
-import asyncio
+
 import argparse
+import asyncio
 import logging
 import os
 import sys
+
 import redis.asyncio as redis
 
 from kernelgym.config import settings
+
 KEY_PREFIX = settings.redis_key_prefix
 from kernelgym.config import setup_logging
 from kernelgym.worker.gpu_worker import GPUWorker
 
 logger = logging.getLogger("kernelgym.single_worker")
+
 
 # Scheme A: hard VRAM cap for the eval worker (prevents OOM contention between
 # vLLM and eval when colocated).
@@ -23,6 +27,7 @@ def _apply_memory_fraction(device: str) -> None:
     frac = float(os.environ.get("EVAL_WORKER_MEM_FRACTION", "0.18"))
     try:
         import torch
+
         torch.cuda.set_per_process_memory_fraction(frac, device=device)
         logger.info(f"Applied memory fraction {frac} on {device} (scheme A hard cap)")
     except Exception as e:
@@ -34,22 +39,24 @@ async def main():
     parser = argparse.ArgumentParser(description="Start a single GPU worker")
     parser.add_argument("--worker-id", required=True, help="Worker ID")
     parser.add_argument("--device", required=True, help="GPU device (e.g., cuda:0)")
-    parser.add_argument("--persistent", action="store_true", help="Record process info for persistent monitor")
+    parser.add_argument(
+        "--persistent", action="store_true", help="Record process info for persistent monitor"
+    )
     args = parser.parse_args()
-    
+
     # Configure logging
     logger = setup_logging(f"worker_{args.worker_id}")
-    
+
     # Initialize Redis connection
     redis_client = redis.from_url(settings.redis_url)
     await redis_client.ping()
     logger.info(f"Redis connection established for worker {args.worker_id}")
-    
+
     # Scheme A: apply the hard VRAM cap (prevents OOM when colocated)
     _apply_memory_fraction(args.device)
 
     worker = GPUWorker(args.worker_id, args.device, redis_client)
-    
+
     try:
         logger.info(f"Starting single worker {args.worker_id} on device {args.device}")
         await worker.start()

@@ -3,29 +3,29 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict
+from typing import Any
 
 
 class Backend(ABC):
     name: str = "unknown"
 
     @abstractmethod
-    def compile(self, code: str, **kwargs: Any) -> Dict[str, Any]:
+    def compile(self, code: str, **kwargs: Any) -> dict[str, Any]:
         """Compile kernel code and return build metadata."""
 
     @abstractmethod
-    def load(self, artifact: Dict[str, Any], **kwargs: Any) -> Any:
+    def load(self, artifact: dict[str, Any], **kwargs: Any) -> Any:
         """Load compiled artifact for execution."""
 
     @abstractmethod
-    def run(self, handle: Any, inputs: Dict[str, Any], **kwargs: Any) -> Dict[str, Any]:
+    def run(self, handle: Any, inputs: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
         """Execute and return runtime metrics."""
 
     def create_model(self, handle: Any, init_inputs: Any, **kwargs: Any) -> Any:
         """Optional hook to construct a model instance from a loaded handle."""
         raise NotImplementedError("create_model is not implemented for this backend.")
 
-    def open_session(self, handle: Any, device: Any | None = None) -> "BackendSession":
+    def open_session(self, handle: Any, device: Any | None = None) -> BackendSession:
         return BackendSession(self, handle, device=device)
 
     def cleanup(self, handle: Any, **kwargs: Any) -> None:
@@ -49,11 +49,9 @@ class BackendSession:
         self.device = device
 
     def create_model(self, init_inputs: Any, **kwargs: Any) -> Any:
-        return self.backend.create_model(
-            self.handle, init_inputs, device=self.device, **kwargs
-        )
+        return self.backend.create_model(self.handle, init_inputs, device=self.device, **kwargs)
 
-    def run(self, inputs: Dict[str, Any], **kwargs: Any) -> Dict[str, Any]:
+    def run(self, inputs: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
         return self.backend.run(self.handle, inputs, device=self.device, **kwargs)
 
     def cleanup(self) -> None:
@@ -62,7 +60,7 @@ class BackendSession:
     def close(self) -> None:
         self.cleanup()
 
-    def __enter__(self) -> "BackendSession":
+    def __enter__(self) -> BackendSession:
         return self
 
     def __exit__(self, exc_type, exc, tb) -> None:

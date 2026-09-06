@@ -1,12 +1,11 @@
 """Error classification utilities for KernelGym."""
 
 import re
-from typing import Optional
 
 from kernelgym.common import ErrorCode
 
 
-def classify_error(error_message: str, context: Optional[str] = None) -> ErrorCode:
+def classify_error(error_message: str, context: str | None = None) -> ErrorCode:
     """Classify error message into appropriate error code."""
     if not error_message:
         return ErrorCode.UNKNOWN_ERROR

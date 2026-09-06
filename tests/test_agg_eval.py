@@ -16,7 +16,6 @@ Data layout produced by per():
 from __future__ import annotations
 
 import json
-import re
 import subprocess
 import sys
 from pathlib import Path
@@ -42,16 +41,13 @@ def _build_tree(base: Path):
     turns_correct_med = {"correctness": True, "performance": 1.3}
     turns_wrong2 = {"correctness": False, "performance": 0.5}
     # correctness can also live in reward_extra_info
-    turns_correct_via_extra = {"reward_extra_info": {"correctness": True},
-                               "performance": 2.0}
+    turns_correct_via_extra = {"reward_extra_info": {"correctness": True}, "performance": 2.0}
 
     # Run names are numeric (agg_eval builds `earlystop_t1_0_r{run}`).
     for rn in ("1", "2", "3"):
         ed = w3 / f"eval_rl_v7b_gs315_earlystop_t1_0_r{rn}" / "eval_outputs"
-        _write_problem(ed, 0, [("sample_0", [turns_correct_fast]),
-                               ("sample_1", [turns_wrong])])
-        _write_problem(ed, 1, [("sample_0", [turns_correct_slow]),
-                               ("sample_1", [turns_correct_med])])
+        _write_problem(ed, 0, [("sample_0", [turns_correct_fast]), ("sample_1", [turns_wrong])])
+        _write_problem(ed, 1, [("sample_0", [turns_correct_slow]), ("sample_1", [turns_correct_med])])
         _write_problem(ed, 2, [("sample_0", [turns_wrong2])])
         # an extra problem reading correctness from reward_extra_info
         _write_problem(ed, 3, [("sample_0", [turns_correct_via_extra])])
@@ -65,7 +61,10 @@ def _run_agg(base: Path, runs, prefix="model_test"):
     env = dict(Path="/usr/bin:/bin", KING_BASE=str(base))
     proc = subprocess.run(
         [sys.executable, str(AGG_EVAL), *runs, prefix],
-        capture_output=True, text=True, env=env, timeout=60,
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=60,
     )
     assert proc.returncode == 0, proc.stderr
     return proc.stdout
@@ -76,7 +75,7 @@ def test_agg_eval_sample_solve_and_fast12(tmp_path):
     out = _run_agg(base, ["1"])
 
     # per-run line for run "1"
-    line = next(l for l in out.splitlines() if l.startswith("  1:"))
+    line = next(row for row in out.splitlines() if row.startswith("  1:"))
     # 4 problems, 6 samples total (4 correct: p0s0,p1s0,p1s1,p3s0) -> 66.7%
     assert "problems=4" in line, line
     assert "sample=6" in line, line
@@ -115,6 +114,6 @@ def test_agg_eval_incorrect_only_problem_excluded_from_fast(tmp_path):
     # Verify problem_2 (all wrong) is excluded from both fast@1.2 and pass1_best.
     base = _build_tree(tmp_path)
     out = _run_agg(base, ["1"])
-    line = next(l for l in out.splitlines() if l.startswith("  1:"))
+    line = next(row for row in out.splitlines() if row.startswith("  1:"))
     assert "fast@1.2best-of=75%" in line  # not 100%
     assert "pass1_best=75%" in line

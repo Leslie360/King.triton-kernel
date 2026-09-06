@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import ast
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 
 from kernelgym.common import ErrorCode
 
@@ -29,7 +29,7 @@ def make_json_safe(obj: Any, depth: int = 0, max_depth: int = 10) -> Any:
     return str(obj)
 
 
-def coerce_error_code(value: Any) -> Optional[ErrorCode | str]:
+def coerce_error_code(value: Any) -> ErrorCode | str | None:
     if value is None:
         return None
     if isinstance(value, ErrorCode):

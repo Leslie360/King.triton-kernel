@@ -18,10 +18,10 @@ jobs:
     name: Lint (ruff)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Set up Python ${{ env.PYTHON_VERSION }}
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: "pip"
@@ -39,10 +39,10 @@ jobs:
     name: Test (CPU-only logic)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Set up Python ${{ env.PYTHON_VERSION }}
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: "pip"
@@ -54,8 +54,14 @@ jobs:
       #   2) best-effort CPU-only torch install that never blocks the job: the
       #      gpu_available fixture in conftest wraps the torch import in
       #      try/except, so pure-logic tests still run without torch.
+      # Test tooling must be installed separately: --no-deps also skips the
+      # dependencies of the [dev] extra, which would leave `pytest` missing
+      # (exit code 127) when the test step runs.
+      - name: Install test tooling
+        run: pip install pytest pytest-cov
+
       - name: Install package (editable, no heavy deps)
-        run: pip install -e ".[dev]" --no-deps
+        run: pip install -e . --no-deps
 
       - name: Install torch CPU (best-effort, optional)
         run: |

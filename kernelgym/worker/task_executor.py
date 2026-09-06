@@ -14,14 +14,14 @@ Date: 2025-10-29
 Version: v0.3.3-alpha
 """
 
-import sys
-import time
 import logging
-import traceback
 import multiprocessing as mp
 import queue
-from typing import Dict, Any, Optional, Tuple
+import sys
+import time
+import traceback
 from dataclasses import dataclass
+from typing import Any
 
 logger = logging.getLogger("kernelgym.task_executor")
 
@@ -29,12 +29,13 @@ logger = logging.getLogger("kernelgym.task_executor")
 @dataclass
 class TaskExecutionMetrics:
     """Task-execution metrics."""
+
     subprocess_spawn_time: float  # subprocess startup time
-    task_execution_time: float    # task execution time
-    total_time: float             # total time
+    task_execution_time: float  # task execution time
+    total_time: float  # total time
     profiling_overhead: float = 0.0  # profiling overhead (if enabled)
     success: bool = True
-    error_type: Optional[str] = None
+    error_type: str | None = None
 
 
 class IsolatedTaskExecutor:
@@ -57,10 +58,10 @@ class IsolatedTaskExecutor:
 
     @staticmethod
     def execute_task(
-        task_data: Dict[str, Any],
+        task_data: dict[str, Any],
         device_id: int,
         timeout: int = 60,
-    ) -> Tuple[Dict[str, Any], TaskExecutionMetrics]:
+    ) -> tuple[dict[str, Any], TaskExecutionMetrics]:
         """
         Execute a generic task (toolkit + backend) in an isolated subprocess.
 
@@ -79,7 +80,7 @@ class IsolatedTaskExecutor:
         start_time = time.time()
 
         # Create a process with the spawn context
-        ctx = mp.get_context('spawn')
+        ctx = mp.get_context("spawn")
         result_queue = ctx.Queue()
         spawn_start = time.time()
 
@@ -108,23 +109,23 @@ class IsolatedTaskExecutor:
             total_time = time.time() - start_time
 
             # Check the result
-            if not result_data.get('success', False):
+            if not result_data.get("success", False):
                 # Task failed
-                error_type = result_data.get('error_type', 'Unknown')
-                error_message = result_data.get('error_message', 'Unknown error')
+                error_type = result_data.get("error_type", "Unknown")
+                error_message = result_data.get("error_message", "Unknown error")
 
                 metrics = TaskExecutionMetrics(
                     subprocess_spawn_time=spawn_time,
                     task_execution_time=exec_time,
                     total_time=total_time,
                     success=False,
-                    error_type=error_type
+                    error_type=error_type,
                 )
 
                 raise RuntimeError(f"{error_type}: {error_message}")
 
             # Task succeeded
-            result = result_data['result']
+            result = result_data["result"]
 
             # Compute profiling overhead
             profiling_overhead = 0.0
@@ -136,7 +137,7 @@ class IsolatedTaskExecutor:
                 task_execution_time=exec_time,
                 total_time=total_time,
                 profiling_overhead=profiling_overhead,
-                success=True
+                success=True,
             )
 
             logger.info(
@@ -160,12 +161,12 @@ class IsolatedTaskExecutor:
                 task_execution_time=timeout,
                 total_time=total_time,
                 success=False,
-                error_type='TimeoutError'
+                error_type="TimeoutError",
             )
 
             raise TimeoutError(
                 f"Task {task_data.get('task_id', 'unknown')} timeout after {timeout}s"
-            )
+            ) from None
 
         except Exception as e:
             # Other errors
@@ -191,14 +192,16 @@ class IsolatedTaskExecutor:
 # Subprocess Worker Functions (module-level so they can be pickled)
 # ============================================================================
 
+
 def _toolkit_worker(
-    task_data: Dict[str, Any],
+    task_data: dict[str, Any],
     device_id: int,
     result_queue: mp.Queue,
 ):
     try:
         import torch
         import torch.cuda
+
         from kernelgym.backend import get_backend
         from kernelgym.toolkit import get_toolkit
 

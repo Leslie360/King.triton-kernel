@@ -1,12 +1,12 @@
 """Monitoring routes for KernelGym API."""
 
 import logging
-from typing import Dict, Any
+from typing import Any
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, Depends, HTTPException
 
-from kernelgym.server.task_manager import TaskManager
 from kernelgym.config import settings
+from kernelgym.server.task_manager import TaskManager
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +17,7 @@ router = APIRouter(prefix="/monitoring", tags=["monitoring"])
 async def get_problematic_codes(
     min_errors: int = 3,
     task_manager: TaskManager = Depends(lambda: None),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     try:
         from .server import get_task_manager
 
@@ -37,13 +37,13 @@ async def get_problematic_codes(
 
     except Exception as exc:
         logger.error(f"Failed to get problematic codes: {exc}")
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @router.get("/retry-queue")
 async def get_retry_queue_status(
     task_manager: TaskManager = Depends(lambda: None),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     try:
         from .server import get_task_manager
 
@@ -76,13 +76,13 @@ async def get_retry_queue_status(
 
     except Exception as exc:
         logger.error(f"Failed to get retry queue status: {exc}")
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @router.get("/worker-health")
 async def get_worker_health(
     task_manager: TaskManager = Depends(lambda: None),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     try:
         from .server import get_task_manager
 
@@ -105,14 +105,14 @@ async def get_worker_health(
 
     except Exception as exc:
         logger.error(f"Failed to get worker health: {exc}")
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @router.post("/clear-error-history/{code_hash}")
 async def clear_error_history(
     code_hash: str,
     task_manager: TaskManager = Depends(lambda: None),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     try:
         from .server import get_task_manager
 
@@ -128,4 +128,4 @@ async def clear_error_history(
 
     except Exception as exc:
         logger.error(f"Failed to clear error history: {exc}")
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail=str(exc)) from exc

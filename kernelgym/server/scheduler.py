@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import Any, Dict, Optional
+from typing import Any
 
 from ..core.scheduler import SchedulerAPI
 from ..core.types import TaskSpec
@@ -28,7 +28,7 @@ class TaskManagerScheduler(SchedulerAPI):
             return await self._task_manager.submit_evaluation_task(payload)
         return await self._task_manager.submit_task(payload)
 
-    async def wait(self, task_id: str, timeout: Optional[float] = None) -> Dict[str, Any]:
+    async def wait(self, task_id: str, timeout: float | None = None) -> dict[str, Any]:
         start = time.monotonic()
         while True:
             result = await self._task_manager.get_task_result(task_id)
@@ -38,7 +38,7 @@ class TaskManagerScheduler(SchedulerAPI):
                 raise TimeoutError(f"Timed out waiting for task {task_id}")
             await asyncio.sleep(self._poll_interval)
 
-    async def get_status(self, task_id: str) -> Dict[str, Any]:
+    async def get_status(self, task_id: str) -> dict[str, Any]:
         status = await self._task_manager.get_task_status(task_id)
         return status or {}
 

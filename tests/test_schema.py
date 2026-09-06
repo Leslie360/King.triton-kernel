@@ -154,9 +154,7 @@ def test_reference_timing_task_roundtrip():
 
 
 def test_kernel_evaluation_task_roundtrip():
-    task = KernelEvaluationTask(
-        task_id="t_ker", base_task_id="t", reference_code="r", kernel_code="k"
-    )
+    task = KernelEvaluationTask(task_id="t_ker", base_task_id="t", reference_code="r", kernel_code="k")
     assert KernelEvaluationTask.from_dict(task.to_dict()) == task
 
 
@@ -226,8 +224,9 @@ def _mk_ref(status="completed", runtime=20.0, err_msg=None, err_code=None):
     )
 
 
-def _mk_kernel(status="completed", correctness=True, runtime=10.0, err_msg=None,
-               err_code=None, compiled=True):
+def _mk_kernel(
+    status="completed", correctness=True, runtime=10.0, err_msg=None, err_code=None, compiled=True
+):
     return KernelEvaluationResult(
         task_id="t_kernel",
         base_task_id="t",
@@ -255,8 +254,7 @@ def test_from_paired_results_speedup():
 
 
 def test_from_paired_results_reference_failure_passthrough():
-    ref = _mk_ref(status="failed", runtime=0.0, err_msg="boom ref",
-                  err_code=ErrorCode.RUNTIME_ERROR)
+    ref = _mk_ref(status="failed", runtime=0.0, err_msg="boom ref", err_code=ErrorCode.RUNTIME_ERROR)
     res = EvaluationResult.from_paired_results("t", ref, _mk_kernel())
     assert res.status == "failed"
     assert res.error_message == "Reference timing failed: boom ref"
@@ -266,8 +264,13 @@ def test_from_paired_results_reference_failure_passthrough():
 
 
 def test_from_paired_results_kernel_failure_passthrough():
-    kern = _mk_kernel(status="failed", correctness=False, runtime=0.0,
-                      err_msg="kernel crash", err_code=ErrorCode.COMPILATION_ERROR)
+    kern = _mk_kernel(
+        status="failed",
+        correctness=False,
+        runtime=0.0,
+        err_msg="kernel crash",
+        err_code=ErrorCode.COMPILATION_ERROR,
+    )
     res = EvaluationResult.from_paired_results("t", _mk_ref(), kern)
     assert res.status == "failed"
     assert res.error_message == "Kernel evaluation failed: kernel crash"
@@ -276,10 +279,8 @@ def test_from_paired_results_kernel_failure_passthrough():
 
 
 def test_from_paired_results_reference_failure_takes_precedence():
-    ref = _mk_ref(status="failed", runtime=0.0, err_msg="ref fail",
-                  err_code=ErrorCode.SYSTEM_ERROR)
-    kern = _mk_kernel(status="failed", err_msg="kernel fail",
-                      err_code=ErrorCode.RUNTIME_ERROR)
+    ref = _mk_ref(status="failed", runtime=0.0, err_msg="ref fail", err_code=ErrorCode.SYSTEM_ERROR)
+    kern = _mk_kernel(status="failed", err_msg="kernel fail", err_code=ErrorCode.RUNTIME_ERROR)
     res = EvaluationResult.from_paired_results("t", ref, kern)
     # reference failure checked first
     assert res.status == "failed"

@@ -3,16 +3,16 @@
 from .core import (
     Artifact,
     Metric,
+    Registry,
     Result,
-    TaskSpec,
-    TaskGroup,
     SchedulerAPI,
+    TaskGroup,
+    TaskSpec,
     WorkflowController,
     WorkflowState,
-    Registry,
 )
-from .workflow import KernelBenchWorkflowController
 from .server import TaskManagerScheduler
+from .workflow import KernelBenchWorkflowController
 
 __all__ = [
     "Artifact",

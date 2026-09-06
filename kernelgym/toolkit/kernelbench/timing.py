@@ -3,17 +3,17 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
 import numpy as np
 import torch
-
-logger = logging.getLogger(__name__)
 
 from kernelgym.toolkit.kernelbench.profiling import (
     extract_profiling_metrics,
     profiling_context,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def time_execution_with_cuda_event(
@@ -24,7 +24,7 @@ def time_execution_with_cuda_event(
     verbose: bool = True,
     device: torch.device = None,
     enable_profiling: bool = False,
-) -> Tuple[List[float], Dict[str, Any]]:
+) -> tuple[list[float], dict[str, Any]]:
     if device is None:
         if verbose:
             logger.info("Using current device: %s", torch.cuda.current_device())
@@ -58,7 +58,7 @@ def time_execution_with_cuda_event(
             logger.info("Trial %s: %s ms", trial + 1, f"{elapsed_time_ms:.3g}")
         elapsed_times.append(elapsed_time_ms)
 
-    profiling_metrics: Dict[str, Any] = {}
+    profiling_metrics: dict[str, Any] = {}
     if enable_profiling:
         try:
             torch.cuda.synchronize(device=device)
@@ -98,13 +98,13 @@ def run_profiling_only(
     num_trials: int = 10,
     verbose: bool = True,
     device: torch.device = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     if device is None:
         if verbose:
             logger.info("Using current device: %s", torch.cuda.current_device())
         device = torch.cuda.current_device()
 
-    profiling_metrics: Dict[str, Any] = {}
+    profiling_metrics: dict[str, Any] = {}
     try:
         torch.cuda.synchronize(device=device)
         logger.info("[Profiling] Running %s iterations (profiling-only)...", num_trials)
@@ -125,7 +125,7 @@ def run_profiling_only(
     return profiling_metrics
 
 
-def get_timing_stats(elapsed_times: List[float], device: torch.device = None) -> dict:
+def get_timing_stats(elapsed_times: list[float], device: torch.device = None) -> dict:
     stats = {
         "mean": float(f"{np.mean(elapsed_times):.3g}"),
         "std": float(f"{np.std(elapsed_times):.3g}"),

@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import os
 from contextlib import contextmanager
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import torch
 
@@ -14,7 +14,7 @@ from kernelgym.config import settings
 logger = logging.getLogger("kernelgym.toolkit.kernelbench.profiling")
 
 
-def compute_triton_kernel_coverage(matched_triton_kernels: List[str], profilling_result: Dict[str, Any]):
+def compute_triton_kernel_coverage(matched_triton_kernels: list[str], profilling_result: dict[str, Any]):
     """Compute the coverage of the matched triton kernels in the profiling result."""
 
     def _matches_profiler_name(captured: str, profiler_name: str) -> bool:
@@ -50,7 +50,9 @@ def compute_triton_kernel_coverage(matched_triton_kernels: List[str], profilling
     triton_kernels_not_in_profiling = [
         kernel_name
         for kernel_name in kernel_names
-        if not any(_matches_profiler_name(kernel_name, prof_name) for prof_name in triton_kernels_in_profiling)
+        if not any(
+            _matches_profiler_name(kernel_name, prof_name) for prof_name in triton_kernels_in_profiling
+        )
     ]
 
     return {
@@ -78,9 +80,7 @@ def profiling_context(enabled: bool = True):
         if "cuda" in settings.profiling_activities:
             activities.append(profiler.ProfilerActivity.CUDA)
 
-        logger.info(
-            "[Profiler] Initializing with activities: %s", [str(a) for a in activities]
-        )
+        logger.info("[Profiler] Initializing with activities: %s", [str(a) for a in activities])
 
         if not activities:
             logger.info("[Profiler] No activities configured, profiler will return no data")
@@ -136,7 +136,7 @@ def profiling_context(enabled: bool = True):
         yield None
 
 
-def extract_profiling_metrics(prof: Optional["torch.profiler.profile"]) -> Dict[str, Any]:
+def extract_profiling_metrics(prof: torch.profiler.profile | None) -> dict[str, Any]:
     if prof is None:
         return {}
 
@@ -152,7 +152,7 @@ def extract_profiling_metrics(prof: Optional["torch.profiler.profile"]) -> Dict[
 
         logger.debug(f"[Profiler] Captured {total_events} total events")
 
-        def _safe_metric(evt: Any, names: Tuple[str, ...], default: float = 0.0) -> float:
+        def _safe_metric(evt: Any, names: tuple[str, ...], default: float = 0.0) -> float:
             for name in names:
                 if hasattr(evt, name):
                     value = getattr(evt, name)
@@ -167,7 +167,7 @@ def extract_profiling_metrics(prof: Optional["torch.profiler.profile"]) -> Dict[
                         continue
             return default
 
-        def _safe_int_metric(evt: Any, names: Tuple[str, ...], default: int = 0) -> int:
+        def _safe_int_metric(evt: Any, names: tuple[str, ...], default: int = 0) -> int:
             for name in names:
                 if hasattr(evt, name):
                     value = getattr(evt, name)
@@ -224,9 +224,7 @@ def extract_profiling_metrics(prof: Optional["torch.profiler.profile"]) -> Dict[
 
         cuda_kernels.sort(key=lambda x: x["cuda_time_us"], reverse=True)
 
-        logger.debug(
-            f"[Profiler] Filtered to {len(cuda_kernels)} CUDA kernels (from {len(events)} total)"
-        )
+        logger.debug(f"[Profiler] Filtered to {len(cuda_kernels)} CUDA kernels (from {len(events)} total)")
         if len(cuda_kernels) == 0 and len(events) > 0:
             logger.warning(
                 f"[Profiler] Captured events but no CUDA kernels! Event types: {[getattr(evt, 'device_type', 'unknown') for evt in list(events)[:5]]}"

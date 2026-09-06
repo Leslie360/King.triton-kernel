@@ -20,8 +20,10 @@ Usage:
     --evaluate   (default) run the POST /evaluate grading-chain check
     --no-evaluate  skip the grading-chain check (health only)
 """
-import sys
+
 import argparse
+import sys
+
 import requests
 
 DEFAULT_SERVER = "http://localhost:10907"
@@ -88,16 +90,13 @@ def check_health(server_url: str) -> None:
 def check_evaluate(server_url: str) -> None:
     """Submit a minimal kernel and assert the grading verdict fields appear."""
     task = dict(MINIMAL_TASK)
-    task["task_id"] = f"smoke_local_evaluate"
+    task["task_id"] = "smoke_local_evaluate"
     r = requests.post(f"{server_url}/evaluate", json=task, timeout=180)
     assert r.status_code == 200, f"/evaluate failed: HTTP {r.status_code} {r.text}"
     body = r.json()
 
     missing = [f for f in VERDICT_FIELDS if f not in body]
-    assert not missing, (
-        f"/evaluate response missing grading fields {missing}; "
-        f"got keys={sorted(body.keys())}"
-    )
+    assert not missing, f"/evaluate response missing grading fields {missing}; got keys={sorted(body.keys())}"
 
     # Print the verdict values for visibility, but do not assert on them — a
     # correct or incorrect kernel both prove the grading chain ran end to end.

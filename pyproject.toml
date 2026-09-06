@@ -73,6 +73,19 @@ extend-exclude = ["docs", "evals"]
 select = ["E", "F", "I", "W", "UP", "B"]
 ignore = ["E501"]
 
+[tool.ruff.lint.per-file-ignores]
+# FastAPI dependency injection calls `Depends(...)` in parameter defaults by design.
+"kernelgym/server/api/*" = ["B008"]
+# These modules must set env vars / guard optional imports (torch, triton) before
+# importing worker-side modules, so imports cannot all sit at the top of the file.
+"kernelgym/worker/gpu_worker.py" = ["E402"]
+"kernelgym/worker/single_worker.py" = ["E402"]
+"kernelgym/worker/worker_monitor.py" = ["E402"]
+"kernelgym/workflow/kernelbench.py" = ["E402"]
+"kernelgym/workflow/kernelbench_helpers.py" = ["E402"]
+# `Backend.cleanup` is an intentionally optional no-op hook for subclasses.
+"kernelgym/backend/base.py" = ["B027"]
+
 [tool.mypy]
 python_version = "3.10"
 ignore_missing_imports = true

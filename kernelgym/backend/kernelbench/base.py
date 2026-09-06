@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import os
-from typing import Any, Dict
+from typing import Any
 
 import torch
 
-from kernelgym.toolkit.kernelbench.loading import graceful_eval_cleanup
 from kernelgym.backend.base import Backend
+from kernelgym.toolkit.kernelbench.loading import graceful_eval_cleanup
 
 
 class KernelBenchBackendBase(Backend):
@@ -60,14 +60,9 @@ class KernelBenchBackendBase(Backend):
         if isinstance(value, torch.Tensor):
             return value.to(device)
         if isinstance(value, (list, tuple)):
-            return type(value)(
-                KernelBenchBackendBase._move_to_device(v, device) for v in value
-            )
+            return type(value)(KernelBenchBackendBase._move_to_device(v, device) for v in value)
         if isinstance(value, dict):
-            return {
-                k: KernelBenchBackendBase._move_to_device(v, device)
-                for k, v in value.items()
-            }
+            return {k: KernelBenchBackendBase._move_to_device(v, device) for k, v in value.items()}
         return value
 
     def create_model(self, handle: Any, init_inputs: Any, **kwargs: Any) -> Any:
@@ -107,7 +102,7 @@ class KernelBenchBackendBase(Backend):
 
         return model
 
-    def run(self, handle: Any, inputs: Dict[str, Any], **kwargs: Any) -> Dict[str, Any]:
+    def run(self, handle: Any, inputs: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
         if not isinstance(handle, dict) or "model_cls" not in handle:
             raise ValueError("KernelBenchBackend.run expects a handle from load()")
 
@@ -134,11 +129,7 @@ class KernelBenchBackendBase(Backend):
 
         if no_grad:
             with torch.no_grad():
-                output = (
-                    model(**run_inputs)
-                    if isinstance(run_inputs, dict)
-                    else model(*run_inputs)
-                )
+                output = model(**run_inputs) if isinstance(run_inputs, dict) else model(*run_inputs)
         else:
             output = model(**run_inputs) if isinstance(run_inputs, dict) else model(*run_inputs)
 

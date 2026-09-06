@@ -4,15 +4,15 @@ from __future__ import annotations
 
 import hashlib
 import logging
-from typing import Any, Optional, Tuple
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 from .kernelbench_types import (
+    EvaluationResult,
     EvaluationTask,
     KernelEvaluationResult,
     KernelEvaluationTask,
-    EvaluationResult,
     ReferenceTimingResult,
     ReferenceTimingTask,
 )
@@ -33,20 +33,20 @@ class InMemoryReferenceCache:
     Note: the cache is valid only within this server process (a server restart
     clears the cache and re-times the denominator).
     """
+
     def __init__(self) -> None:
         self._store: dict = {}
 
-    def _key(self, uuid: Optional[str], reference_code: str, is_valid: bool):
+    def _key(self, uuid: str | None, reference_code: str, is_valid: bool):
         ref_hash = hashlib.md5((reference_code or "").encode()).hexdigest()[:16]
         return (uuid, ref_hash, bool(is_valid))
 
-    def get(self, uuid: Optional[str], reference_code: str, is_valid: bool) -> Optional[float]:
+    def get(self, uuid: str | None, reference_code: str, is_valid: bool) -> float | None:
         if not uuid:
             return None
         return self._store.get(self._key(uuid, reference_code, is_valid))
 
-    def put(self, uuid: Optional[str], reference_code: str, is_valid: bool,
-            runtime: float) -> None:
+    def put(self, uuid: str | None, reference_code: str, is_valid: bool, runtime: float) -> None:
         if not uuid or runtime is None:
             return
         self._store[self._key(uuid, reference_code, is_valid)] = float(runtime)
@@ -61,16 +61,13 @@ def set_reference_cache(cache: Any) -> None:
     _reference_cache = cache
 
 
-def _get_cached_reference_runtime(
-    uuid: Optional[str], reference_code: str, is_valid: bool
-) -> Optional[float]:
+def _get_cached_reference_runtime(uuid: str | None, reference_code: str, is_valid: bool) -> float | None:
     if _reference_cache is None:
         return None
     return _reference_cache.get(uuid, reference_code, is_valid)
 
 
-def _put_reference_cache(uuid: Optional[str], reference_code: str, is_valid: bool,
-                         runtime: float) -> None:
+def _put_reference_cache(uuid: str | None, reference_code: str, is_valid: bool, runtime: float) -> None:
     """PUT the reference denominator into the cache (2026-08-29 P0 deep fix):
     write after the reference has been timed, and reuse the fixed denominator
     across runs."""
@@ -82,7 +79,7 @@ def _put_reference_cache(uuid: Optional[str], reference_code: str, is_valid: boo
         logger.error("[refcache] put error: %s", e)
 
 
-def _validate_code(code: str, entry_point: str = "Model") -> Tuple[bool, str]:
+def _validate_code(code: str, entry_point: str = "Model") -> tuple[bool, str]:
     try:
         if not code:
             return False, "Code is required"
@@ -95,15 +92,13 @@ def _validate_code(code: str, entry_point: str = "Model") -> Tuple[bool, str]:
 
 def _create_paired_tasks(
     task: EvaluationTask,
-) -> Tuple[Optional[ReferenceTimingTask], KernelEvaluationTask]:
+) -> tuple[ReferenceTimingTask | None, KernelEvaluationTask]:
     ref_device = task.device_preference or task.device
     kernel_device = task.device
 
-    reference_task: Optional[ReferenceTimingTask] = None
+    reference_task: ReferenceTimingTask | None = None
     if task.use_reference_cache and task.uuid:
-        cached_runtime = _get_cached_reference_runtime(
-            task.uuid, task.reference_code, task.is_valid
-        )
+        cached_runtime = _get_cached_reference_runtime(task.uuid, task.reference_code, task.is_valid)
         if cached_runtime is None:
             reference_task = ReferenceTimingTask(
                 task_id=f"{task.task_id}_ref",
@@ -171,9 +166,7 @@ def _combine_results(
     kernel_result: KernelEvaluationResult,
 ) -> EvaluationResult:
     if reference_result.base_task_id != kernel_result.base_task_id:
-        raise ValueError(
-            f"Task ID mismatch: {reference_result.base_task_id} != {kernel_result.base_task_id}"
-        )
+        raise ValueError(f"Task ID mismatch: {reference_result.base_task_id} != {kernel_result.base_task_id}")
     return EvaluationResult.from_paired_results(
         reference_result.base_task_id, reference_result, kernel_result
     )

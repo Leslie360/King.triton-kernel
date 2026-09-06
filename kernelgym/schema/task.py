@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, asdict
-from typing import Any, Dict, Optional
+from dataclasses import asdict, dataclass
+from typing import Any
 
 
 @dataclass
@@ -20,25 +20,25 @@ class EvaluationTask:
     device: str = "cuda:0"
     priority: str = "normal"
     entry_point: str = "Model"
-    reference_backend: Optional[str] = None
-    device_preference: Optional[str] = None
+    reference_backend: str | None = None
+    device_preference: str | None = None
     force_refresh: bool = False
-    uuid: Optional[str] = None
+    uuid: str | None = None
     use_reference_cache: bool = False
     is_valid: bool = False
-    enable_profiling: Optional[bool] = None
-    enable_triton_detection: Optional[bool] = None
-    measure_performance: Optional[bool] = None
-    run_correctness: Optional[bool] = None
-    run_triton_detection: Optional[bool] = None
-    run_performance: Optional[bool] = None
-    resources: Optional[Dict[str, Any]] = None
+    enable_profiling: bool | None = None
+    enable_triton_detection: bool | None = None
+    measure_performance: bool | None = None
+    run_correctness: bool | None = None
+    run_triton_detection: bool | None = None
+    run_performance: bool | None = None
+    resources: dict[str, Any] | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "EvaluationTask":
+    def from_dict(cls, data: dict[str, Any]) -> EvaluationTask:
         valid_fields = {f.name for f in cls.__dataclass_fields__.values()}
         filtered_data = {k: v for k, v in data.items() if k in valid_fields}
         return cls(**filtered_data)
@@ -57,15 +57,15 @@ class ReferenceTimingTask:
     device: str = "cuda:0"
     priority: str = "normal"
     entry_point: str = "Model"
-    reference_backend: Optional[str] = None
-    device_preference: Optional[str] = None
-    resources: Optional[Dict[str, Any]] = None
+    reference_backend: str | None = None
+    device_preference: str | None = None
+    resources: dict[str, Any] | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "ReferenceTimingTask":
+    def from_dict(cls, data: dict[str, Any]) -> ReferenceTimingTask:
         valid_fields = {f.name for f in cls.__dataclass_fields__.values()}
         filtered_data = {k: v for k, v in data.items() if k in valid_fields}
         return cls(**filtered_data)
@@ -86,20 +86,20 @@ class KernelEvaluationTask:
     device: str = "cuda:0"
     priority: str = "normal"
     entry_point: str = "Model"
-    device_preference: Optional[str] = None
-    enable_profiling: Optional[bool] = None
-    enable_triton_detection: Optional[bool] = None
-    measure_performance: Optional[bool] = None
-    run_correctness: Optional[bool] = None
-    run_triton_detection: Optional[bool] = None
-    run_performance: Optional[bool] = None
-    resources: Optional[Dict[str, Any]] = None
+    device_preference: str | None = None
+    enable_profiling: bool | None = None
+    enable_triton_detection: bool | None = None
+    measure_performance: bool | None = None
+    run_correctness: bool | None = None
+    run_triton_detection: bool | None = None
+    run_performance: bool | None = None
+    resources: dict[str, Any] | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "KernelEvaluationTask":
+    def from_dict(cls, data: dict[str, Any]) -> KernelEvaluationTask:
         valid_fields = {f.name for f in cls.__dataclass_fields__.values()}
         filtered_data = {k: v for k, v in data.items() if k in valid_fields}
         return cls(**filtered_data)

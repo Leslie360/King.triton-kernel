@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import traceback
-from dataclasses import dataclass, asdict
-from typing import Any, Dict, Optional
+from dataclasses import asdict, dataclass
+from typing import Any
 
 from kernelgym.common import ErrorCode
 from kernelgym.toolkit.kernelbench.exec_types import KernelExecResult
@@ -12,7 +12,7 @@ from kernelgym.toolkit.kernelbench.exec_types import KernelExecResult
 from .serialization import coerce_error_code, make_json_safe, serialize_error_code
 
 
-def _filter_fields(cls, data: Dict[str, Any]) -> Dict[str, Any]:
+def _filter_fields(cls, data: dict[str, Any]) -> dict[str, Any]:
     valid_fields = {f.name for f in cls.__dataclass_fields__.values()}
     return {k: v for k, v in data.items() if k in valid_fields}
 
@@ -22,12 +22,12 @@ class ReferenceTimingResult:
     task_id: str
     base_task_id: str
     reference_runtime: float
-    metadata: Dict[str, Any]
+    metadata: dict[str, Any]
     status: str = "completed"
-    error_message: Optional[str] = None
-    error_code: Optional[ErrorCode | str] = None
+    error_message: str | None = None
+    error_code: ErrorCode | str | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         result = asdict(self)
         if result.get("metadata"):
             result["metadata"] = make_json_safe(result["metadata"])
@@ -35,7 +35,7 @@ class ReferenceTimingResult:
         return result
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "ReferenceTimingResult":
+    def from_dict(cls, data: dict[str, Any]) -> ReferenceTimingResult:
         filtered_data = _filter_fields(cls, data)
         if "error_code" in filtered_data:
             filtered_data["error_code"] = coerce_error_code(filtered_data["error_code"])
@@ -47,15 +47,15 @@ class KernelEvaluationResult:
     task_id: str
     base_task_id: str
     compiled: bool
-    correctness: Optional[bool]
+    correctness: bool | None
     decoy_kernel: bool
     kernel_runtime: float
-    metadata: Dict[str, Any]
+    metadata: dict[str, Any]
     status: str = "completed"
-    error_message: Optional[str] = None
-    error_code: Optional[ErrorCode | str] = None
+    error_message: str | None = None
+    error_code: ErrorCode | str | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         result = asdict(self)
         if result.get("metadata"):
             result["metadata"] = make_json_safe(result["metadata"])
@@ -63,7 +63,7 @@ class KernelEvaluationResult:
         return result
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "KernelEvaluationResult":
+    def from_dict(cls, data: dict[str, Any]) -> KernelEvaluationResult:
         filtered_data = _filter_fields(cls, data)
         if "error_code" in filtered_data:
             filtered_data["error_code"] = coerce_error_code(filtered_data["error_code"])
@@ -76,8 +76,8 @@ class KernelEvaluationResult:
         base_task_id: str,
         result: KernelExecResult,
         verbose_errors: bool = True,
-    ) -> "KernelEvaluationResult":
-        metadata: Dict[str, Any] = dict(result.metadata or {})
+    ) -> KernelEvaluationResult:
+        metadata: dict[str, Any] = dict(result.metadata or {})
 
         for key in (
             "compilation_error",
@@ -92,8 +92,10 @@ class KernelEvaluationResult:
             "total_kernel_run_time_in_profiling_us",
             "custom_kernel_cuda_time_coverage",
         ):
-            if key in metadata and metadata[key] is not None and not isinstance(
-                metadata[key], (str, int, float, bool)
+            if (
+                key in metadata
+                and metadata[key] is not None
+                and not isinstance(metadata[key], (str, int, float, bool))
             ):
                 if isinstance(metadata[key], BaseException):
                     if verbose_errors:
@@ -106,20 +108,18 @@ class KernelEvaluationResult:
                                 )
                             )
                         else:
-                            metadata[key] = (
-                                f"{type(metadata[key]).__name__}: {str(metadata[key])}"
-                            )
+                            metadata[key] = f"{type(metadata[key]).__name__}: {str(metadata[key])}"
                     else:
                         metadata[key] = str(metadata[key])
                 else:
                     metadata[key] = str(metadata[key])
 
-        error_message: Optional[str] = None
-        error_code: Optional[ErrorCode] = None
+        error_message: str | None = None
+        error_code: ErrorCode | None = None
 
         if not result.compiled:
-            detail = metadata.get("compilation_error") or metadata.get("error") or metadata.get(
-                "validation_error"
+            detail = (
+                metadata.get("compilation_error") or metadata.get("error") or metadata.get("validation_error")
             )
             if detail:
                 error_message = f"Kernel compilation failed: {detail}"
@@ -158,12 +158,12 @@ class EvaluationResult:
     reference_runtime: float
     kernel_runtime: float
     speedup: float
-    metadata: Dict[str, Any]
+    metadata: dict[str, Any]
     status: str = "completed"
-    error_message: Optional[str] = None
-    error_code: Optional[ErrorCode | str] = None
+    error_message: str | None = None
+    error_code: ErrorCode | str | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         result = asdict(self)
         if result.get("metadata"):
             result["metadata"] = make_json_safe(result["metadata"])
@@ -171,7 +171,7 @@ class EvaluationResult:
         return result
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "EvaluationResult":
+    def from_dict(cls, data: dict[str, Any]) -> EvaluationResult:
         filtered_data = _filter_fields(cls, data)
         if "error_code" in filtered_data:
             filtered_data["error_code"] = coerce_error_code(filtered_data["error_code"])
@@ -180,7 +180,7 @@ class EvaluationResult:
     @classmethod
     def from_kernel_exec_result(
         cls, task_id: str, result: KernelExecResult, reference_runtime: float
-    ) -> "EvaluationResult":
+    ) -> EvaluationResult:
         speedup = 0.0
         if result.correctness and result.runtime > 0 and reference_runtime > 0:
             speedup = reference_runtime / result.runtime
@@ -200,7 +200,7 @@ class EvaluationResult:
     @classmethod
     def from_paired_results(
         cls, base_task_id: str, reference_result: ReferenceTimingResult, kernel_result: KernelEvaluationResult
-    ) -> "EvaluationResult":
+    ) -> EvaluationResult:
         speedup = 0.0
         if (
             kernel_result.correctness
@@ -209,7 +209,7 @@ class EvaluationResult:
         ):
             speedup = reference_result.reference_runtime / kernel_result.kernel_runtime
 
-        combined_metadata: Dict[str, Any] = {}
+        combined_metadata: dict[str, Any] = {}
         combined_metadata.update(reference_result.metadata or {})
         combined_metadata.update(kernel_result.metadata or {})
         combined_metadata["reference_task_id"] = reference_result.task_id

@@ -143,8 +143,7 @@ def test_create_paired_tasks_no_uuid_always_creates_ref():
 
 
 def test_create_paired_tasks_ref_device_preference():
-    task = _base_task(use_reference_cache=False, device_preference="cuda:1",
-                      device="cuda:0")
+    task = _base_task(use_reference_cache=False, device_preference="cuda:1", device="cuda:0")
     ref_task, kernel_task = _create_paired_tasks(task)
     assert ref_task.device == "cuda:1"  # uses device_preference
     assert kernel_task.device == "cuda:0"  # kernel uses task.device
@@ -155,15 +154,22 @@ def test_create_paired_tasks_ref_device_preference():
 # ---------------------------------------------------------------------------
 def _ref(base="t1", status="completed", runtime=20.0):
     return ReferenceTimingResult(
-        task_id="t1_ref", base_task_id=base, reference_runtime=runtime,
-        metadata={}, status=status,
+        task_id="t1_ref",
+        base_task_id=base,
+        reference_runtime=runtime,
+        metadata={},
+        status=status,
     )
 
 
 def _kern(base="t1", correctness=True, runtime=10.0):
     return KernelEvaluationResult(
-        task_id="t1_kernel", base_task_id=base, compiled=True,
-        correctness=correctness, decoy_kernel=False, kernel_runtime=runtime,
+        task_id="t1_kernel",
+        base_task_id=base,
+        compiled=True,
+        correctness=correctness,
+        decoy_kernel=False,
+        kernel_runtime=runtime,
         metadata={},
     )
 

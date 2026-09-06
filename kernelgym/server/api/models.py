@@ -1,17 +1,17 @@
 """API request/response models for KernelGym server."""
 
-from typing import Dict, Any, Optional, List
+from typing import Any
 
 from pydantic import BaseModel, Field, root_validator, validator
 
-from kernelgym.common import TaskStatus, Backend, Priority, ErrorCode
+from kernelgym.common import Backend, ErrorCode, Priority, TaskStatus
 
 
 class EvaluationRequest(BaseModel):
     """Request model for kernel evaluation."""
 
     task_id: str = Field(..., description="Unique task identifier")
-    reference_code: Optional[str] = Field(default=None, description="PyTorch reference implementation")
+    reference_code: str | None = Field(default=None, description="PyTorch reference implementation")
     kernel_code: str = Field(..., description="Custom kernel implementation")
     toolkit: str = Field(default="kernelbench", description="Toolkit adapter name")
     backend_adapter: str = Field(default="kernelbench", description="Backend adapter name")
@@ -21,60 +21,60 @@ class EvaluationRequest(BaseModel):
     num_warmup: int = Field(default=3, ge=0, le=100, description="Number of warmup iterations")
     timeout: int = Field(default=300, ge=10, le=3600, description="Task timeout in seconds")
     priority: Priority = Field(default=Priority.NORMAL, description="Task priority")
-    device_preference: Optional[str] = Field(default=None, description="Preferred GPU device")
+    device_preference: str | None = Field(default=None, description="Preferred GPU device")
     force_refresh: bool = Field(default=False, description="Force refresh, skip cached results")
     entry_point: str = Field(default="Model", description="Entry point class name for model evaluation")
-    reference_backend: Optional[str] = Field(
+    reference_backend: str | None = Field(
         default=None,
         description="Reference backend for timing (e.g., pytorch, torch_compile)",
     )
-    uuid: Optional[str] = Field(default=None, description="UUID for reference timing cache lookup")
+    uuid: str | None = Field(default=None, description="UUID for reference timing cache lookup")
     use_reference_cache: bool = Field(default=False, description="Use cached reference timing if available")
     is_valid: bool = Field(
         default=False,
         description="If true, use validation data cache (val_data_cache) instead of regular cache",
     )
-    verbose_errors: Optional[bool] = Field(
+    verbose_errors: bool | None = Field(
         default=None,
         description="Return full error traceback. None=use server default, True=full traceback, False=short message",
     )
-    enable_profiling: Optional[bool] = Field(
+    enable_profiling: bool | None = Field(
         default=None,
         description="Enable torch.profiler for this request. None=use server default, True=enable, False=disable",
     )
-    enable_triton_detection: Optional[bool] = Field(
+    enable_triton_detection: bool | None = Field(
         default=None,
         description="Enable Triton kernel usage detection (decoy check)",
     )
-    measure_performance: Optional[bool] = Field(
+    measure_performance: bool | None = Field(
         default=None,
         description="Measure kernel performance timing (default True for kernelbench)",
     )
-    run_correctness: Optional[bool] = Field(
+    run_correctness: bool | None = Field(
         default=None,
         description="Run correctness checks (default True for kernelbench)",
     )
-    run_triton_detection: Optional[bool] = Field(
+    run_triton_detection: bool | None = Field(
         default=None,
         description="Run Triton usage detection step (overrides enable_triton_detection)",
     )
-    run_performance: Optional[bool] = Field(
+    run_performance: bool | None = Field(
         default=None,
         description="Run performance timing step (overrides measure_performance)",
     )
-    cases_code: Optional[str] = Field(
+    cases_code: str | None = Field(
         default=None,
         description="Python code defining get_cases()/get_inputs() for kernel_simple workflow",
     )
-    cases: Optional[List[Any]] = Field(
+    cases: list[Any] | None = Field(
         default=None,
         description="Inline cases for kernel_simple workflow",
     )
-    workflow: Optional[str] = Field(
+    workflow: str | None = Field(
         default="kernelbench",
         description="Workflow controller name (e.g. kernelbench)",
     )
-    resources: Optional[Dict[str, Any]] = Field(
+    resources: dict[str, Any] | None = Field(
         default=None,
         description="Resource requirements (e.g. {'gpus': 2})",
     )
@@ -129,18 +129,18 @@ class EvaluationResponse(BaseModel):
 
     task_id: str
     status: TaskStatus
-    compiled: Optional[bool] = None
-    correctness: Optional[bool] = None
-    decoy_kernel: Optional[bool] = None
-    reference_runtime: Optional[float] = None
-    kernel_runtime: Optional[float] = None
-    speedup: Optional[float] = None
-    metadata: Optional[Dict[str, Any]] = None
-    error_message: Optional[str] = None
-    error_code: Optional[ErrorCode] = None
-    submitted_at: Optional[str] = None
-    completed_at: Optional[str] = None
-    processing_time: Optional[float] = None
+    compiled: bool | None = None
+    correctness: bool | None = None
+    decoy_kernel: bool | None = None
+    reference_runtime: float | None = None
+    kernel_runtime: float | None = None
+    speedup: float | None = None
+    metadata: dict[str, Any] | None = None
+    error_message: str | None = None
+    error_code: ErrorCode | None = None
+    submitted_at: str | None = None
+    completed_at: str | None = None
+    processing_time: float | None = None
 
     class Config:
         json_schema_extra = {
@@ -165,7 +165,7 @@ class BatchEvaluationRequest(BaseModel):
     """Request model for batch evaluation."""
 
     batch_id: str = Field(..., description="Unique batch identifier")
-    tasks: List[EvaluationRequest] = Field(..., description="List of evaluation tasks")
+    tasks: list[EvaluationRequest] = Field(..., description="List of evaluation tasks")
 
     @validator("tasks")
     def validate_tasks(cls, v):
@@ -200,10 +200,10 @@ class BatchEvaluationResponse(BaseModel):
     total_tasks: int
     completed_tasks: int
     failed_tasks: int
-    results: List[EvaluationResponse]
+    results: list[EvaluationResponse]
     batch_status: TaskStatus
-    submitted_at: Optional[str] = None
-    completed_at: Optional[str] = None
+    submitted_at: str | None = None
+    completed_at: str | None = None
 
 
 class TaskStatusResponse(BaseModel):
@@ -211,10 +211,10 @@ class TaskStatusResponse(BaseModel):
 
     task_id: str
     status: TaskStatus
-    progress: Optional[float] = Field(default=None, description="Progress percentage (0-100)")
-    estimated_completion: Optional[str] = Field(default=None, description="Estimated completion time")
-    queue_position: Optional[int] = Field(default=None, description="Position in queue")
-    assigned_device: Optional[str] = Field(default=None, description="Assigned GPU device")
+    progress: float | None = Field(default=None, description="Progress percentage (0-100)")
+    estimated_completion: str | None = Field(default=None, description="Estimated completion time")
+    queue_position: int | None = Field(default=None, description="Position in queue")
+    assigned_device: str | None = Field(default=None, description="Assigned GPU device")
 
     class Config:
         json_schema_extra = {
@@ -233,10 +233,10 @@ class WorkflowRequest(BaseModel):
     """Generic workflow submission request."""
 
     workflow: str = Field(default="kernelbench", description="Workflow controller name")
-    payload: Dict[str, Any] = Field(default_factory=dict, description="Workflow-specific payload")
-    task_id: Optional[str] = Field(default=None, description="Optional task id override")
+    payload: dict[str, Any] = Field(default_factory=dict, description="Workflow-specific payload")
+    task_id: str | None = Field(default=None, description="Optional task id override")
     force_refresh: bool = Field(default=False, description="Force refresh, skip cached results")
-    resources: Optional[Dict[str, Any]] = Field(
+    resources: dict[str, Any] | None = Field(
         default=None,
         description="Resource requirements (e.g. {'gpus': 2})",
     )
@@ -247,11 +247,11 @@ class WorkflowResponse(BaseModel):
 
     task_id: str
     status: TaskStatus
-    result: Optional[Dict[str, Any]] = None
-    error_message: Optional[str] = None
-    error_code: Optional[ErrorCode] = None
-    submitted_at: Optional[str] = None
-    completed_at: Optional[str] = None
+    result: dict[str, Any] | None = None
+    error_message: str | None = None
+    error_code: ErrorCode | None = None
+    submitted_at: str | None = None
+    completed_at: str | None = None
 
 
 class SystemHealthResponse(BaseModel):
@@ -259,9 +259,9 @@ class SystemHealthResponse(BaseModel):
 
     status: str
     timestamp: str
-    gpu_status: Dict[str, Any]
-    queue_status: Dict[str, Any]
-    memory_usage: Dict[str, Any]
+    gpu_status: dict[str, Any]
+    queue_status: dict[str, Any]
+    memory_usage: dict[str, Any]
     active_tasks: int
     total_processed: int
     uptime: float
@@ -288,10 +288,10 @@ class MetricsResponse(BaseModel):
     """Response model for system metrics."""
 
     timestamp: str
-    performance_metrics: Dict[str, Any]
-    resource_metrics: Dict[str, Any]
-    queue_metrics: Dict[str, Any]
-    error_metrics: Dict[str, Any]
+    performance_metrics: dict[str, Any]
+    resource_metrics: dict[str, Any]
+    queue_metrics: dict[str, Any]
+    error_metrics: dict[str, Any]
 
 
 class ErrorResponse(BaseModel):
@@ -299,8 +299,8 @@ class ErrorResponse(BaseModel):
 
     error: str
     message: str
-    error_code: Optional[ErrorCode] = None
-    task_id: Optional[str] = None
+    error_code: ErrorCode | None = None
+    task_id: str | None = None
     timestamp: str
 
     class Config:
