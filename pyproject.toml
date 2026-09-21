@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "king-triton-kernel"
-version = "0.1.0"
+version = "0.1.1"
 description = "Caliber-disciplined evaluation toolkit and verifier-driven agent-RL framework for Triton kernel generation — reward execution correctness over compilation, with reference-timing discipline"
 readme = "README.md"
 license = { text = "MIT" }

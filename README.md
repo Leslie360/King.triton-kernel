@@ -124,7 +124,7 @@ Protocol caveats:
 
 **Requirements**: Python ≥ 3.10, Linux + NVIDIA GPU (driver-visible is enough; CUDA ships with torch/triton), Redis.
 
-**Verified environment** (the exact stack on which all headline numbers and the 132-test suite were produced):
+**Verified environment** (the exact stack on which all headline numbers and the 134-test suite were produced):
 
 | Component | Version / note |
 |---|---|
@@ -193,7 +193,7 @@ King.triton-kernel/
 ├── kernelgym/   # Distributed GPU evaluation environment (core lib + server + worker)
 ├── evals/       # Aggregation and calibers (agg_eval.py / compare_gs_eval.py / repro_pass_at_k.py)
 ├── docs/        # ARCHITECTURE.md (architecture & calibers) / ROADMAP.md
-├── tests/       # 132 test functions (CI runs the CPU-only logic subset)
+├── tests/       # 134 test functions (CI runs the CPU-only logic subset)
 ├── setup.sh      # Dependency installation
 └── smoke_test.py
 ```
@@ -227,6 +227,8 @@ Layering rule: `kernelgym/` stays free of verl/ray/vllm dependencies so the eval
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Contributing guide (incl. evaluation-caliber discipline) |
 
 ## Release Status
+
+v0.1.1 (2026-09-06) trims the OSS package to the evaluation environment and caliber tooling only (training-side stack removed), ships under the MIT License alone, and locks the SFT v2 headline at **68.3% ± 6.2pp** (n=3), co-headline with the RL baseline (61.0%).
 
 v0.1.0 (2026-08-31) is the first public release: `kernelgym/`, `evals/`, docs, and tests are real code, with private datasets, training checkpoints, internal logs, and internal paths excluded. The repository ships the evaluation environment and caliber tooling under the MIT License (see [NOTICE](NOTICE)).
 
